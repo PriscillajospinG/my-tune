@@ -9,7 +9,6 @@ import '../../providers/playlist_provider.dart';
 import '../../services/database_service.dart';
 import '../../widgets/album_card.dart';
 import '../../widgets/artist_card.dart';
-import '../../widgets/playlist_card.dart';
 import '../../widgets/search_bar_widget.dart';
 import '../../widgets/song_tile.dart';
 

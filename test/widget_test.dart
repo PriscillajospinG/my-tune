@@ -12,5 +12,9 @@ void main() {
 
     // Initial frame rendered successfully
     expect(find.byType(MyTuneApp), findsOneWidget);
+
+    // Let the splash screen timer and animation finish
+    await tester.pump(const Duration(milliseconds: 3000));
+    await tester.pumpAndSettle();
   });
 }

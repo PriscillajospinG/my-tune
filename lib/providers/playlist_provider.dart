@@ -90,6 +90,8 @@ class FavoriteNotifier extends Notifier<Set<int>> {
     // Invalidate home-screen favorites list
     ref.invalidate(favoriteSongsProvider);
   }
+
+  Future<void> toggleFavorite(int songId) => toggle(songId);
 }
 
 final favoriteNotifierProvider = NotifierProvider<FavoriteNotifier, Set<int>>(

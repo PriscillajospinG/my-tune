@@ -52,6 +52,19 @@ class SongTile extends ConsumerWidget {
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
+          IconButton(
+            icon: Icon(
+              isFav ? Icons.favorite : Icons.favorite_border,
+              color: isFav ? AppTheme.accentHeart : AppTheme.iconInactive,
+              size: 18,
+            ),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+            onPressed: () => ref
+                .read(favoriteNotifierProvider.notifier)
+                .toggleFavorite(song.id),
+          ),
+          const SizedBox(width: 4),
           if (isPlaying)
             const _PlayingIndicator()
           else
@@ -65,7 +78,7 @@ class SongTile extends ConsumerWidget {
           const SizedBox(width: 4),
           GestureDetector(
             onTap: onMoreTap,
-            child: Icon(
+            child: const Icon(
               Icons.more_vert,
               color: AppTheme.iconInactive,
               size: 20,

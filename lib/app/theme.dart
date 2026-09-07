@@ -6,6 +6,7 @@ class AppTheme {
   static const Color primaryVariant = Color(0xFF8B85FF); // Lighter violet
   static const Color accent = Color(0xFF00D4FF);         // Electric cyan
   static const Color accentWarm = Color(0xFFFF6B6B);     // Coral
+  static const Color accentHeart = Color(0xFFFF4757);    // Vivid Heart Red
 
   // Backgrounds
   static const Color bgDeep = Color(0xFF0A0A0F);    // Near-black

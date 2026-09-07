@@ -26,7 +26,7 @@ class DatabaseService {
   final _albumStreamController = StreamController<List<Album>>.broadcast();
   final _artistStreamController = StreamController<List<Artist>>.broadcast();
   final _playlistStreamController = StreamController<List<Playlist>>.broadcast();
-  final _favStreamController = StreamController<List<_FavRow>>.broadcast();
+  final _favStreamController = StreamController<List<Song>>.broadcast();
 
   // ── Database init ──────────────────────────────────────────────────────────
 
@@ -297,7 +297,7 @@ class DatabaseService {
     return rows.map(Song.fromMap).toList();
   }
 
-  Stream<List<_FavRow>> watchFavorites() => _favStreamController.stream;
+  Stream<List<Song>> watchFavorites() => _favStreamController.stream;
 
   Future<bool> isFavorite(int songId) async {
     final db = await database;
@@ -402,8 +402,10 @@ class DatabaseService {
   }
 
   Future<void> _notifyFavs() async {
-    // Just emit a signal — FavoriteNotifier handles the state
-    if (!_favStreamController.isClosed) _favStreamController.add([]);
+    if (!_favStreamController.isClosed) {
+      final favs = await getFavoriteSongs();
+      _favStreamController.add(favs);
+    }
   }
 
   void dispose() {
@@ -414,6 +416,3 @@ class DatabaseService {
     _favStreamController.close();
   }
 }
-
-/// Internal helper class for the favorites stream signal
-class _FavRow {}

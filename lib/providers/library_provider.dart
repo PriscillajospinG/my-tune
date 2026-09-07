@@ -5,7 +5,6 @@ import '../models/artist.dart';
 import '../models/song.dart';
 import '../services/database_service.dart';
 import '../services/media_library_service.dart';
-import 'playlist_provider.dart' show favoriteSongsProvider;
 
 export 'playlist_provider.dart'
     show favoriteSongsProvider, favoriteNotifierProvider, FavoriteNotifier;

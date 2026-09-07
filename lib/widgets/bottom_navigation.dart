@@ -40,8 +40,8 @@ class MainShell extends ConsumerWidget {
     final player = ref.watch(playerProvider);
     final hasSong = player.currentSong != null;
 
-    int _selectedIndex = _navItems.indexWhere((item) => location.startsWith(item.route));
-    if (_selectedIndex < 0) _selectedIndex = 0;
+    int selectedIndex = _navItems.indexWhere((item) => location.startsWith(item.route));
+    if (selectedIndex < 0) selectedIndex = 0;
 
     return Scaffold(
       backgroundColor: AppTheme.bgDeep,
@@ -56,22 +56,18 @@ class MainShell extends ConsumerWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (hasSong) ...[
-              const SizedBox(height: 8),
-              const MiniPlayer(),
-              const SizedBox(height: 4),
-            ],
+            if (hasSong) const MiniPlayer(),
             NavigationBar(
               backgroundColor: Colors.transparent,
-              indicatorColor: AppTheme.primary.withValues(alpha: 0.15),
-              selectedIndex: _selectedIndex,
+              elevation: 0,
+              indicatorColor: AppTheme.primary.withOpacity(0.18),
+              selectedIndex: selectedIndex,
               labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
               height: AppConstants.bottomNavHeight + 10,
               onDestinationSelected: (i) {
                 context.go(_navItems[i].route);
               },
               destinations: _navItems.map((item) {
-                final isSelected = _navItems.indexOf(item) == _selectedIndex;
                 return NavigationDestination(
                   icon: Icon(item.icon,
                       color: AppTheme.iconInactive, size: 22),

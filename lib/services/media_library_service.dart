@@ -65,9 +65,9 @@ class MediaLibraryService {
     final imported = <Song>[];
     for (final ds in deviceSongs) {
       final path = ds.data;
-      if (path == null || path.isEmpty) continue;
+      if (path.isEmpty) continue;
 
-      final ext = ds.fileExtension?.toLowerCase() ?? '';
+      final ext = ds.fileExtension.toLowerCase();
       if (!_supportedExtensions.contains(ext)) continue;
       if (existingPaths.contains(path)) continue;
 

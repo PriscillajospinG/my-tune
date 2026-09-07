@@ -9,7 +9,6 @@ import '../../models/song.dart';
 import '../../providers/library_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../providers/playlist_provider.dart';
-import '../../services/database_service.dart';
 import '../../utils/constants.dart';
 import '../../widgets/song_tile.dart';
 
@@ -21,7 +20,6 @@ class HomeScreen extends ConsumerWidget {
     final recentAsync = ref.watch(recentlyPlayedProvider);
     final favsAsync = ref.watch(favoriteSongsProvider);
     final playlistsAsync = ref.watch(playlistsStreamProvider);
-    final player = ref.watch(playerProvider);
 
     return Scaffold(
       backgroundColor: AppTheme.bgDeep,

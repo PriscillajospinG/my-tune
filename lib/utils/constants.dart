@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../app/theme.dart';
 
 class AppConstants {
   static const double bottomNavHeight = 60.0;

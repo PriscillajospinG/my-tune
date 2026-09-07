@@ -15,7 +15,7 @@ class SettingsScreen extends ConsumerStatefulWidget {
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   String _dbSize = 'Calculating…';
-  String _appVersion = '1.0.0';
+  final String _appVersion = '1.0.0';
 
   @override
   void initState() {
