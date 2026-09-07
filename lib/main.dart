@@ -23,7 +23,6 @@ Future<void> main() async {
     androidNotificationChannelName: 'MyTune Audio',
     androidNotificationOngoing: true,
     androidShowNotificationBadge: true,
-    androidNotificationClickOpensApp: true,
     preloadArtwork: true,
   );
 

@@ -20,6 +20,7 @@ dependencies:
 
   # Database — sqflite requires NO code generation
   sqflite: ^2.4.1
+  path: ^1.9.0
   path_provider: ^2.1.5
 
   # State management

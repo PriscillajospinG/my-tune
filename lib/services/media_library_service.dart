@@ -6,9 +6,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:on_audio_query/on_audio_query.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-import '../models/song.dart';
 import '../models/album.dart';
 import '../models/artist.dart';
+import '../models/song.dart';
 import 'database_service.dart';
 
 final mediaLibraryServiceProvider = Provider<MediaLibraryService>((ref) {
@@ -16,8 +16,8 @@ final mediaLibraryServiceProvider = Provider<MediaLibraryService>((ref) {
   return MediaLibraryService(db);
 });
 
-// ─── MusicSource abstraction ────────────────────────────────────────────────
-// Designed to allow LocalMusicSource, CloudMusicSource, OnlineMusicSource etc.
+// ─── MusicSource abstraction ──────────────────────────────────────────────────
+// Designed so a future CloudMusicSource / OnlineMusicSource can be added easily.
 
 abstract class MusicSource {
   Future<List<Song>> fetchSongs();
@@ -32,7 +32,7 @@ class LocalMusicSource implements MusicSource {
   Future<List<Song>> fetchSongs() => _service.queryDeviceSongs();
 }
 
-// ─── MediaLibraryService ────────────────────────────────────────────────────
+// ─── MediaLibraryService ──────────────────────────────────────────────────────
 
 class MediaLibraryService {
   final DatabaseService _db;
@@ -46,7 +46,7 @@ class MediaLibraryService {
 
   // ── Public API ─────────────────────────────────────────────────────────────
 
-  /// Query all songs from device media store (Android/iOS).
+  /// Query all songs from the device media store (Android / iOS).
   /// Requests permissions if needed. Returns newly imported songs.
   Future<List<Song>> queryDeviceSongs() async {
     final hasPermission = await _requestPermissions();
@@ -59,38 +59,40 @@ class MediaLibraryService {
       ignoreCase: true,
     );
 
+    final existing = await _db.getAllSongs();
+    final existingPaths = existing.map((s) => s.filePath).toSet();
+
     final imported = <Song>[];
     for (final ds in deviceSongs) {
-      if (ds.data == null || ds.data!.isEmpty) continue;
+      final path = ds.data;
+      if (path == null || path.isEmpty) continue;
 
       final ext = ds.fileExtension?.toLowerCase() ?? '';
       if (!_supportedExtensions.contains(ext)) continue;
+      if (existingPaths.contains(path)) continue;
 
-      // Skip already imported paths
-      final existing = await _db.getAllSongs();
-      if (existing.any((s) => s.filePath == ds.data)) continue;
+      final song = Song(
+        title: ds.title.isNotEmpty ? ds.title : _fileNameWithoutExt(path),
+        artist: ds.artist ?? 'Unknown Artist',
+        album: ds.album ?? 'Unknown Album',
+        filePath: path,
+        durationMs: ds.duration ?? 0,
+        albumArtBytes: null, // Loaded on-demand via fetchArtworkForSong()
+        dateAdded: DateTime.now(),
+      );
 
-      final song = Song()
-        ..title = ds.title.isNotEmpty ? ds.title : _fileNameWithoutExt(ds.data!)
-        ..artist = ds.artist ?? 'Unknown Artist'
-        ..album = ds.album ?? 'Unknown Album'
-        ..filePath = ds.data!
-        ..durationMs = ds.duration ?? 0
-        ..albumArtBytes = null // fetched on-demand via on_audio_query
-        ..dateAdded = DateTime.now();
+      final savedId = await _db.saveSong(song);
+      if (savedId <= 0) continue;
 
-      final id = await _db.saveSong(song);
-      song.id = id;
-
-      await _upsertAlbum(song, ds.albumId);
-      await _upsertArtist(song);
-
-      imported.add(song);
+      final savedSong = song.copyWith(id: savedId);
+      await _upsertAlbum(savedSong);
+      await _upsertArtist(savedSong);
+      imported.add(savedSong);
     }
     return imported;
   }
 
-  /// Import songs via file picker (iOS fallback or cross-platform manual import)
+  /// Import songs via file picker (iOS / manual import fallback).
   Future<List<Song>> importSongsFromPicker() async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.audio,
@@ -100,6 +102,9 @@ class MediaLibraryService {
 
     if (result == null || result.files.isEmpty) return [];
 
+    final existing = await _db.getAllSongs();
+    final existingPaths = existing.map((s) => s.filePath).toSet();
+
     final imported = <Song>[];
     for (final file in result.files) {
       final path = file.path;
@@ -107,31 +112,31 @@ class MediaLibraryService {
 
       final ext = path.split('.').last.toLowerCase();
       if (!_supportedExtensions.contains(ext)) continue;
+      if (existingPaths.contains(path)) continue;
 
-      final existing = await _db.getAllSongs();
-      if (existing.any((s) => s.filePath == path)) continue;
+      final song = Song(
+        title: _fileNameWithoutExt(path),
+        artist: 'Unknown Artist',
+        album: 'Unknown Album',
+        filePath: path,
+        durationMs: 0,
+        albumArtBytes: null,
+        dateAdded: DateTime.now(),
+      );
 
-      final song = Song()
-        ..title = _fileNameWithoutExt(path)
-        ..artist = 'Unknown Artist'
-        ..album = 'Unknown Album'
-        ..filePath = path
-        ..durationMs = 0
-        ..albumArtBytes = null
-        ..dateAdded = DateTime.now();
+      final savedId = await _db.saveSong(song);
+      if (savedId <= 0) continue;
 
-      final id = await _db.saveSong(song);
-      song.id = id;
-      await _upsertAlbum(song, null);
-      await _upsertArtist(song);
-      imported.add(song);
+      final savedSong = song.copyWith(id: savedId);
+      await _upsertAlbum(savedSong);
+      await _upsertArtist(savedSong);
+      imported.add(savedSong);
     }
     return imported;
   }
 
-  /// Fetches album artwork bytes for a song using on_audio_query.
-  /// Returns null if not available.
-  Future<Uint8List?> fetchArtworkForSong(int songId, int? albumId) async {
+  /// Fetches album artwork bytes using on_audio_query (Android / iOS).
+  Future<Uint8List?> fetchArtworkForSong(int songId, {int? albumId}) async {
     try {
       final artwork = await _audioQuery.queryArtwork(
         albumId ?? songId,
@@ -150,48 +155,33 @@ class MediaLibraryService {
   Future<bool> _requestPermissions() async {
     if (Platform.isAndroid) {
       // Android 13+ uses READ_MEDIA_AUDIO; older uses READ_EXTERNAL_STORAGE
-      final status = await Permission.audio.request();
-      if (status.isGranted) return true;
-      // Fallback for older Android
+      final audio = await Permission.audio.request();
+      if (audio.isGranted) return true;
       final storage = await Permission.storage.request();
       return storage.isGranted;
-    } else if (Platform.isIOS) {
-      // on_audio_query handles iOS MPMediaLibrary permission internally
-      return true;
     }
+    // iOS: on_audio_query handles MPMediaLibrary permission internally
     return true;
   }
 
-  Future<void> _upsertAlbum(Song song, int? deviceAlbumId) async {
+  Future<void> _upsertAlbum(Song song) async {
     final albums = await _db.getAllAlbums();
-    Album? album = albums
-        .where((a) => a.name == song.album && a.artist == song.artist)
-        .firstOrNull;
-
-    if (album == null) {
-      album = Album()
-        ..name = song.album
-        ..artist = song.artist
-        ..artBytes = null
-        ..songIds = [song.id];
-    } else {
-      if (!album.songIds.contains(song.id)) album.songIds.add(song.id);
+    final exists = albums.any(
+        (a) => a.name == song.album && a.artist == song.artist);
+    if (!exists) {
+      await _db.saveAlbum(Album(
+        name: song.album,
+        artist: song.artist,
+      ));
     }
-    await _db.saveAlbum(album);
   }
 
   Future<void> _upsertArtist(Song song) async {
     final artists = await _db.getAllArtists();
-    Artist? artist = artists.where((a) => a.name == song.artist).firstOrNull;
-
-    if (artist == null) {
-      artist = Artist()
-        ..name = song.artist
-        ..songIds = [song.id];
-    } else {
-      if (!artist.songIds.contains(song.id)) artist.songIds.add(song.id);
+    final exists = artists.any((a) => a.name == song.artist);
+    if (!exists) {
+      await _db.saveArtist(Artist(name: song.artist));
     }
-    await _db.saveArtist(artist);
   }
 
   String _fileNameWithoutExt(String path) {

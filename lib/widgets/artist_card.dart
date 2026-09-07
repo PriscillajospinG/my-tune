@@ -46,9 +46,9 @@ class ArtistCard extends StatelessWidget {
               textAlign: TextAlign.center,
               overflow: TextOverflow.ellipsis,
             ),
-            Text(
-              '${artist.songIds.length} songs',
-              style: const TextStyle(
+            const Text(
+              'Artist',
+              style: TextStyle(
                 color: AppTheme.textMuted,
                 fontSize: 10,
               ),
