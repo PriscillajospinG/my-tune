@@ -2,10 +2,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/playlist.dart';
 import '../models/song.dart';
-import '../models/favorite.dart';
 import '../services/database_service.dart';
 
-// ─── Playlists ────────────────────────────────────────────────────────────
+// ─── Playlists ────────────────────────────────────────────────────────────────
 
 final playlistsStreamProvider = StreamProvider<List<Playlist>>((ref) {
   final db = ref.watch(databaseServiceProvider);
@@ -58,29 +57,24 @@ class PlaylistNotifier extends AsyncNotifier<List<Playlist>> {
   }
 }
 
-final playlistProvider = AsyncNotifierProvider<PlaylistNotifier, List<Playlist>>(
+final playlistProvider =
+    AsyncNotifierProvider<PlaylistNotifier, List<Playlist>>(
   PlaylistNotifier.new,
 );
 
-// ─── Favorites ────────────────────────────────────────────────────────────
-
-final favoritesStreamProvider = StreamProvider<List<Favorite>>((ref) {
-  final db = ref.watch(databaseServiceProvider);
-  return db.watchFavorites();
-});
+// ─── Favorites ────────────────────────────────────────────────────────────────
 
 class FavoriteNotifier extends Notifier<Set<int>> {
   @override
   Set<int> build() {
-    // Eagerly load favorite IDs
     _loadFavorites();
     return {};
   }
 
   Future<void> _loadFavorites() async {
     final db = ref.read(databaseServiceProvider);
-    final favs = await db.getFavoriteSongs();
-    state = favs.map((s) => s.id).toSet();
+    final ids = await db.getAllFavoriteIds();
+    state = ids;
   }
 
   bool isFavorite(int songId) => state.contains(songId);
@@ -93,22 +87,15 @@ class FavoriteNotifier extends Notifier<Set<int>> {
     } else {
       state = {...state, songId};
     }
-    // Invalidate home screen favorites
+    // Invalidate home-screen favorites list
     ref.invalidate(favoriteSongsProvider);
   }
 }
-
-// ignore: unused_element
-final _favoriteSongsProvider = FutureProvider<List<Song>>((ref) {
-  final db = ref.watch(databaseServiceProvider);
-  return db.getFavoriteSongs();
-});
 
 final favoriteNotifierProvider = NotifierProvider<FavoriteNotifier, Set<int>>(
   FavoriteNotifier.new,
 );
 
-// Re-export for library_provider reference
 final favoriteSongsProvider = FutureProvider<List<Song>>((ref) {
   final db = ref.watch(databaseServiceProvider);
   return db.getFavoriteSongs();

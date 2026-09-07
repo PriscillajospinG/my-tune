@@ -1,267 +1,419 @@
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:isar/isar.dart';
+import 'dart:async';
 
-import '../models/song.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
+import 'package:sqflite/sqflite.dart';
+
 import '../models/album.dart';
 import '../models/artist.dart';
 import '../models/playlist.dart';
-import '../models/playlist_song.dart';
-import '../models/favorite.dart';
-import '../models/recently_played.dart';
+import '../models/song.dart';
 
-/// Riverpod provider for the Isar instance (overridden in main.dart)
-final isarProvider = Provider<Isar>((ref) => throw UnimplementedError());
+// ─── Provider ────────────────────────────────────────────────────────────────
 
-/// Provides the DatabaseService singleton
 final databaseServiceProvider = Provider<DatabaseService>((ref) {
-  final isar = ref.watch(isarProvider);
-  return DatabaseService(isar);
+  return DatabaseService();
 });
 
+// ─── DatabaseService ─────────────────────────────────────────────────────────
+
 class DatabaseService {
-  final Isar _isar;
+  static Database? _db;
 
-  DatabaseService(this._isar);
+  // Stream controllers for reactive UI updates
+  final _songStreamController = StreamController<List<Song>>.broadcast();
+  final _albumStreamController = StreamController<List<Album>>.broadcast();
+  final _artistStreamController = StreamController<List<Artist>>.broadcast();
+  final _playlistStreamController = StreamController<List<Playlist>>.broadcast();
+  final _favStreamController = StreamController<List<_FavRow>>.broadcast();
 
-  // ─── Songs ───────────────────────────────────────────────────────
+  // ── Database init ──────────────────────────────────────────────────────────
+
+  Future<Database> get database async {
+    _db ??= await _openDatabase();
+    return _db!;
+  }
+
+  Future<Database> _openDatabase() async {
+    final dir = await getApplicationDocumentsDirectory();
+    final dbPath = p.join(dir.path, 'mytune.db');
+
+    return openDatabase(
+      dbPath,
+      version: 1,
+      onCreate: _onCreate,
+    );
+  }
+
+  Future<void> _onCreate(Database db, int version) async {
+    await db.execute('''
+      CREATE TABLE songs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        artist TEXT NOT NULL,
+        album TEXT NOT NULL,
+        filePath TEXT NOT NULL UNIQUE,
+        albumArtBytes TEXT,
+        durationMs INTEGER NOT NULL DEFAULT 0,
+        dateAdded INTEGER NOT NULL
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE albums (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        artist TEXT NOT NULL,
+        artBytes TEXT,
+        UNIQUE(name, artist)
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE artists (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE playlists (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        createdAt INTEGER NOT NULL,
+        updatedAt INTEGER
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE playlist_songs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        playlistId INTEGER NOT NULL,
+        songId INTEGER NOT NULL,
+        position INTEGER NOT NULL DEFAULT 0,
+        UNIQUE(playlistId, songId),
+        FOREIGN KEY(playlistId) REFERENCES playlists(id),
+        FOREIGN KEY(songId) REFERENCES songs(id)
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE favorites (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        songId INTEGER NOT NULL UNIQUE,
+        addedAt INTEGER NOT NULL,
+        FOREIGN KEY(songId) REFERENCES songs(id)
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE recently_played (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        songId INTEGER NOT NULL,
+        playedAt INTEGER NOT NULL,
+        FOREIGN KEY(songId) REFERENCES songs(id)
+      )
+    ''');
+
+    await db.execute('CREATE INDEX idx_playlist_songs_playlist ON playlist_songs(playlistId)');
+    await db.execute('CREATE INDEX idx_recently_played_time ON recently_played(playedAt DESC)');
+  }
+
+  // ── Songs ─────────────────────────────────────────────────────────────────
 
   Future<List<Song>> getAllSongs() async {
-    return _isar.songs.where().sortByTitle().findAll();
+    final db = await database;
+    final rows = await db.query('songs', orderBy: 'title ASC');
+    return rows.map(Song.fromMap).toList();
   }
 
-  Stream<List<Song>> watchAllSongs() {
-    return _isar.songs.where().sortByTitle().watch(fireImmediately: true);
-  }
+  Stream<List<Song>> watchAllSongs() => _songStreamController.stream;
 
   Future<Song?> getSongById(int id) async {
-    return _isar.songs.get(id);
+    final db = await database;
+    final rows = await db.query('songs', where: 'id = ?', whereArgs: [id]);
+    if (rows.isEmpty) return null;
+    return Song.fromMap(rows.first);
   }
 
   Future<int> saveSong(Song song) async {
-    return _isar.writeTxn(() => _isar.songs.put(song));
+    final db = await database;
+    final id = await db.insert(
+      'songs',
+      song.toMap(),
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    await _notifySongs();
+    return id;
   }
 
   Future<void> deleteSong(int id) async {
-    await _isar.writeTxn(() async {
-      await _isar.songs.delete(id);
-      // Cascade: remove favorites, recents, playlist entries
-      final favs = await _isar.favorites.filter().songIdEqualTo(id).findAll();
-      for (final f in favs) {
-        await _isar.favorites.delete(f.id);
-      }
-      final recents = await _isar.recentlyPlayeds.filter().songIdEqualTo(id).findAll();
-      for (final r in recents) {
-        await _isar.recentlyPlayeds.delete(r.id);
-      }
-      final ps = await _isar.playlistSongs.filter().songIdEqualTo(id).findAll();
-      for (final p in ps) {
-        await _isar.playlistSongs.delete(p.id);
-      }
+    final db = await database;
+    await db.transaction((txn) async {
+      await txn.delete('songs', where: 'id = ?', whereArgs: [id]);
+      await txn.delete('favorites', where: 'songId = ?', whereArgs: [id]);
+      await txn.delete('recently_played', where: 'songId = ?', whereArgs: [id]);
+      await txn.delete('playlist_songs', where: 'songId = ?', whereArgs: [id]);
     });
+    await _notifySongs();
   }
 
-  // ─── Albums ──────────────────────────────────────────────────────
+  // ── Albums ────────────────────────────────────────────────────────────────
 
   Future<List<Album>> getAllAlbums() async {
-    return _isar.albums.where().sortByName().findAll();
+    final db = await database;
+    final rows = await db.query('albums', orderBy: 'name ASC');
+    return rows.map(Album.fromMap).toList();
   }
 
-  Stream<List<Album>> watchAllAlbums() {
-    return _isar.albums.where().sortByName().watch(fireImmediately: true);
-  }
+  Stream<List<Album>> watchAllAlbums() => _albumStreamController.stream;
 
   Future<int> saveAlbum(Album album) async {
-    return _isar.writeTxn(() => _isar.albums.put(album));
+    final db = await database;
+    final id = await db.insert(
+      'albums',
+      album.toMap(),
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    await _notifyAlbums();
+    return id > 0 ? id : await _getAlbumId(album.name, album.artist);
   }
 
-  // ─── Artists ─────────────────────────────────────────────────────
+  Future<int> _getAlbumId(String name, String artist) async {
+    final db = await database;
+    final rows = await db.query('albums',
+        where: 'name = ? AND artist = ?', whereArgs: [name, artist]);
+    return rows.isEmpty ? 0 : rows.first['id'] as int;
+  }
+
+  // ── Artists ───────────────────────────────────────────────────────────────
 
   Future<List<Artist>> getAllArtists() async {
-    return _isar.artists.where().sortByName().findAll();
+    final db = await database;
+    final rows = await db.query('artists', orderBy: 'name ASC');
+    return rows.map(Artist.fromMap).toList();
   }
 
-  Stream<List<Artist>> watchAllArtists() {
-    return _isar.artists.where().sortByName().watch(fireImmediately: true);
-  }
+  Stream<List<Artist>> watchAllArtists() => _artistStreamController.stream;
 
   Future<int> saveArtist(Artist artist) async {
-    return _isar.writeTxn(() => _isar.artists.put(artist));
+    final db = await database;
+    final id = await db.insert(
+      'artists',
+      artist.toMap(),
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    await _notifyArtists();
+    return id;
   }
 
-  // ─── Playlists ───────────────────────────────────────────────────
+  // ── Playlists ─────────────────────────────────────────────────────────────
 
   Future<List<Playlist>> getAllPlaylists() async {
-    return _isar.playlists.where().findAll();
+    final db = await database;
+    final rows = await db.query('playlists', orderBy: 'createdAt ASC');
+    return rows.map(Playlist.fromMap).toList();
   }
 
-  Stream<List<Playlist>> watchAllPlaylists() {
-    return _isar.playlists.where().watch(fireImmediately: true);
-  }
+  Stream<List<Playlist>> watchAllPlaylists() => _playlistStreamController.stream;
 
   Future<int> createPlaylist(String name) async {
-    final playlist = Playlist()
-      ..name = name
-      ..createdAt = DateTime.now();
-    return _isar.writeTxn(() => _isar.playlists.put(playlist));
+    final db = await database;
+    final id = await db.insert('playlists', {
+      'name': name,
+      'createdAt': DateTime.now().millisecondsSinceEpoch,
+    });
+    await _notifyPlaylists();
+    return id;
   }
 
   Future<void> renamePlaylist(int id, String newName) async {
-    final playlist = await _isar.playlists.get(id);
-    if (playlist != null) {
-      playlist.name = newName;
-      playlist.updatedAt = DateTime.now();
-      await _isar.writeTxn(() => _isar.playlists.put(playlist));
-    }
+    final db = await database;
+    await db.update(
+      'playlists',
+      {'name': newName, 'updatedAt': DateTime.now().millisecondsSinceEpoch},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    await _notifyPlaylists();
   }
 
   Future<void> deletePlaylist(int id) async {
-    await _isar.writeTxn(() async {
-      await _isar.playlists.delete(id);
-      final entries = await _isar.playlistSongs.filter().playlistIdEqualTo(id).findAll();
-      for (final e in entries) {
-        await _isar.playlistSongs.delete(e.id);
-      }
+    final db = await database;
+    await db.transaction((txn) async {
+      await txn.delete('playlist_songs', where: 'playlistId = ?', whereArgs: [id]);
+      await txn.delete('playlists', where: 'id = ?', whereArgs: [id]);
     });
+    await _notifyPlaylists();
   }
 
   Future<List<Song>> getSongsInPlaylist(int playlistId) async {
-    final entries = await _isar.playlistSongs
-        .filter()
-        .playlistIdEqualTo(playlistId)
-        .sortByPosition()
-        .findAll();
-    final songs = <Song>[];
-    for (final e in entries) {
-      final song = await _isar.songs.get(e.songId);
-      if (song != null) songs.add(song);
-    }
-    return songs;
+    final db = await database;
+    final rows = await db.rawQuery('''
+      SELECT s.* FROM songs s
+      INNER JOIN playlist_songs ps ON ps.songId = s.id
+      WHERE ps.playlistId = ?
+      ORDER BY ps.position ASC
+    ''', [playlistId]);
+    return rows.map(Song.fromMap).toList();
   }
 
   Future<void> addSongToPlaylist(int playlistId, int songId) async {
-    // Check if already in playlist
-    final existing = await _isar.playlistSongs
-        .filter()
-        .playlistIdEqualTo(playlistId)
-        .songIdEqualTo(songId)
-        .findFirst();
-    if (existing != null) return;
+    final db = await database;
+    final existing = await db.query('playlist_songs',
+        where: 'playlistId = ? AND songId = ?',
+        whereArgs: [playlistId, songId]);
+    if (existing.isNotEmpty) return;
 
-    final maxPos = await _isar.playlistSongs
-        .filter()
-        .playlistIdEqualTo(playlistId)
-        .sortByPositionDesc()
-        .findFirst();
-    final pos = (maxPos?.position ?? -1) + 1;
+    final maxPos = await db.rawQuery(
+        'SELECT MAX(position) as pos FROM playlist_songs WHERE playlistId = ?',
+        [playlistId]);
+    final pos = (maxPos.first['pos'] as int? ?? -1) + 1;
 
-    final ps = PlaylistSong()
-      ..playlistId = playlistId
-      ..songId = songId
-      ..position = pos;
-
-    await _isar.writeTxn(() => _isar.playlistSongs.put(ps));
-
-    // Update playlist timestamp
-    final playlist = await _isar.playlists.get(playlistId);
-    if (playlist != null) {
-      playlist.updatedAt = DateTime.now();
-      await _isar.writeTxn(() => _isar.playlists.put(playlist));
-    }
+    await db.insert('playlist_songs',
+        {'playlistId': playlistId, 'songId': songId, 'position': pos},
+        conflictAlgorithm: ConflictAlgorithm.ignore);
+    await _notifyPlaylists();
   }
 
   Future<void> removeSongFromPlaylist(int playlistId, int songId) async {
-    final entries = await _isar.playlistSongs
-        .filter()
-        .playlistIdEqualTo(playlistId)
-        .songIdEqualTo(songId)
-        .findAll();
-    await _isar.writeTxn(() async {
-      for (final e in entries) {
-        await _isar.playlistSongs.delete(e.id);
-      }
-    });
+    final db = await database;
+    await db.delete('playlist_songs',
+        where: 'playlistId = ? AND songId = ?',
+        whereArgs: [playlistId, songId]);
+    await _notifyPlaylists();
   }
 
-  // ─── Favorites ───────────────────────────────────────────────────
+  // ── Favorites ─────────────────────────────────────────────────────────────
 
   Future<List<Song>> getFavoriteSongs() async {
-    final favs = await _isar.favorites.where().sortByAddedAtDesc().findAll();
-    final songs = <Song>[];
-    for (final f in favs) {
-      final s = await _isar.songs.get(f.songId);
-      if (s != null) songs.add(s);
-    }
-    return songs;
+    final db = await database;
+    final rows = await db.rawQuery('''
+      SELECT s.* FROM songs s
+      INNER JOIN favorites f ON f.songId = s.id
+      ORDER BY f.addedAt DESC
+    ''');
+    return rows.map(Song.fromMap).toList();
   }
 
-  Stream<List<Favorite>> watchFavorites() {
-    return _isar.favorites.where().watch(fireImmediately: true);
-  }
+  Stream<List<_FavRow>> watchFavorites() => _favStreamController.stream;
 
   Future<bool> isFavorite(int songId) async {
-    return _isar.favorites.filter().songIdEqualTo(songId).isNotEmpty();
+    final db = await database;
+    final rows = await db.query('favorites',
+        where: 'songId = ?', whereArgs: [songId]);
+    return rows.isNotEmpty;
   }
 
   Future<void> toggleFavorite(int songId) async {
-    final existing = await _isar.favorites.filter().songIdEqualTo(songId).findFirst();
-    if (existing != null) {
-      await _isar.writeTxn(() => _isar.favorites.delete(existing.id));
+    final db = await database;
+    final existing = await db.query('favorites',
+        where: 'songId = ?', whereArgs: [songId]);
+    if (existing.isNotEmpty) {
+      await db.delete('favorites', where: 'songId = ?', whereArgs: [songId]);
     } else {
-      final fav = Favorite()
-        ..songId = songId
-        ..addedAt = DateTime.now();
-      await _isar.writeTxn(() => _isar.favorites.put(fav));
+      await db.insert('favorites', {
+        'songId': songId,
+        'addedAt': DateTime.now().millisecondsSinceEpoch,
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
     }
+    await _notifyFavs();
   }
 
-  // ─── Recently Played ─────────────────────────────────────────────
+  Future<Set<int>> getAllFavoriteIds() async {
+    final db = await database;
+    final rows = await db.query('favorites', columns: ['songId']);
+    return rows.map((r) => r['songId'] as int).toSet();
+  }
+
+  // ── Recently Played ───────────────────────────────────────────────────────
 
   Future<List<Song>> getRecentlyPlayed({int limit = 20}) async {
-    final recents = await _isar.recentlyPlayeds
-        .where()
-        .sortByPlayedAtDesc()
-        .limit(limit)
-        .findAll();
-
-    final seen = <int>{};
-    final songs = <Song>[];
-    for (final r in recents) {
-      if (seen.contains(r.songId)) continue;
-      seen.add(r.songId);
-      final s = await _isar.songs.get(r.songId);
-      if (s != null) songs.add(s);
-    }
-    return songs;
+    final db = await database;
+    // Distinct songIds ordered by most recent play, then look up songs
+    final rows = await db.rawQuery('''
+      SELECT s.*, MAX(rp.playedAt) as lastPlayed
+      FROM songs s
+      INNER JOIN recently_played rp ON rp.songId = s.id
+      GROUP BY s.id
+      ORDER BY lastPlayed DESC
+      LIMIT ?
+    ''', [limit]);
+    return rows.map(Song.fromMap).toList();
   }
 
   Future<void> recordPlay(int songId) async {
-    final rec = RecentlyPlayed()
-      ..songId = songId
-      ..playedAt = DateTime.now();
-    await _isar.writeTxn(() => _isar.recentlyPlayeds.put(rec));
-
-    // Keep only the last 200 records total to avoid unbounded growth
-    final all = await _isar.recentlyPlayeds.where().sortByPlayedAtDesc().findAll();
-    if (all.length > 200) {
-      final toDelete = all.sublist(200);
-      await _isar.writeTxn(() async {
-        for (final r in toDelete) {
-          await _isar.recentlyPlayeds.delete(r.id);
-        }
-      });
-    }
+    final db = await database;
+    await db.insert('recently_played', {
+      'songId': songId,
+      'playedAt': DateTime.now().millisecondsSinceEpoch,
+    });
+    // Prune old records (keep max 500)
+    await db.execute('''
+      DELETE FROM recently_played
+      WHERE id NOT IN (
+        SELECT id FROM recently_played ORDER BY playedAt DESC LIMIT 500
+      )
+    ''');
   }
 
-  // ─── Search ──────────────────────────────────────────────────────
+  // ── Search ────────────────────────────────────────────────────────────────
 
   Future<List<Song>> searchSongs(String query) async {
-    final q = query.toLowerCase().trim();
-    if (q.isEmpty) return getAllSongs();
-    final all = await _isar.songs.where().findAll();
-    return all.where((s) {
-      return s.title.toLowerCase().contains(q) ||
-          s.artist.toLowerCase().contains(q) ||
-          s.album.toLowerCase().contains(q);
-    }).toList();
+    if (query.isEmpty) return getAllSongs();
+    final db = await database;
+    final q = '%${query.toLowerCase()}%';
+    final rows = await db.rawQuery('''
+      SELECT * FROM songs
+      WHERE LOWER(title) LIKE ? OR LOWER(artist) LIKE ? OR LOWER(album) LIKE ?
+      ORDER BY title ASC
+    ''', [q, q, q]);
+    return rows.map(Song.fromMap).toList();
+  }
+
+  // ── DB info ───────────────────────────────────────────────────────────────
+
+  Future<String> getDatabasePath() async {
+    final dir = await getApplicationDocumentsDirectory();
+    return p.join(dir.path, 'mytune.db');
+  }
+
+  // ── Stream notifications ──────────────────────────────────────────────────
+
+  Future<void> _notifySongs() async {
+    final songs = await getAllSongs();
+    if (!_songStreamController.isClosed) _songStreamController.add(songs);
+  }
+
+  Future<void> _notifyAlbums() async {
+    final albums = await getAllAlbums();
+    if (!_albumStreamController.isClosed) _albumStreamController.add(albums);
+  }
+
+  Future<void> _notifyArtists() async {
+    final artists = await getAllArtists();
+    if (!_artistStreamController.isClosed) _artistStreamController.add(artists);
+  }
+
+  Future<void> _notifyPlaylists() async {
+    final playlists = await getAllPlaylists();
+    if (!_playlistStreamController.isClosed) _playlistStreamController.add(playlists);
+  }
+
+  Future<void> _notifyFavs() async {
+    // Just emit a signal — FavoriteNotifier handles the state
+    if (!_favStreamController.isClosed) _favStreamController.add([]);
+  }
+
+  void dispose() {
+    _songStreamController.close();
+    _albumStreamController.close();
+    _artistStreamController.close();
+    _playlistStreamController.close();
+    _favStreamController.close();
   }
 }
+
+/// Internal helper class for the favorites stream signal
+class _FavRow {}

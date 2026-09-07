@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart';
@@ -7,25 +5,18 @@ import 'package:just_audio/just_audio.dart';
 import '../models/song.dart';
 import 'database_service.dart';
 
-/// Riverpod provider — initialized in main via overrideWithValue after audio_service.init
+/// Riverpod provider — overridden in main.dart after AudioService.init()
 final audioPlayerServiceProvider = Provider<AudioPlayerService>(
-  (ref) => throw UnimplementedError('Must be overridden in ProviderScope'),
-);
-
-/// Exposes the AudioHandler as an AudioPlayerService
-final audioHandlerProvider = Provider<AudioPlayerService>(
-  (ref) => ref.watch(audioPlayerServiceProvider),
+  (ref) => throw UnimplementedError('Override in ProviderScope'),
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Playback state helpers
-// ─────────────────────────────────────────────────────────────────────────────
 
-class AudioPlayerService extends BaseAudioHandler with QueueHandler, SeekHandler {
+class AudioPlayerService extends BaseAudioHandler
+    with QueueHandler, SeekHandler {
   final AudioPlayer _player = AudioPlayer();
   final DatabaseService _db;
 
-  /// Currently loaded queue (Song list)
   List<Song> _queue = [];
   int _currentIndex = 0;
   bool _shuffle = false;
@@ -36,7 +27,6 @@ class AudioPlayerService extends BaseAudioHandler with QueueHandler, SeekHandler
   }
 
   void _init() {
-    // Forward just_audio events to audio_service
     _player.playbackEventStream.listen(_broadcastState);
 
     _player.playerStateStream.listen((state) {
@@ -53,19 +43,15 @@ class AudioPlayerService extends BaseAudioHandler with QueueHandler, SeekHandler
     });
   }
 
-  // ─── Public API ─────────────────────────────────────────────────
+  // ── Public API ──────────────────────────────────────────────────────────
 
   Future<void> loadQueue(List<Song> songs, {int startIndex = 0}) async {
+    if (songs.isEmpty) return;
     _queue = songs;
-    _currentIndex = startIndex.clamp(0, songs.isEmpty ? 0 : songs.length - 1);
-
-    // Build MediaItem queue for audio_service
+    _currentIndex = startIndex.clamp(0, songs.length - 1);
     final items = songs.map(_songToMediaItem).toList();
     queue.add(items);
-
-    if (songs.isNotEmpty) {
-      await _loadCurrent();
-    }
+    await _loadCurrent();
   }
 
   Future<void> playSong(Song song, {List<Song>? queue}) async {
@@ -84,7 +70,7 @@ class AudioPlayerService extends BaseAudioHandler with QueueHandler, SeekHandler
   bool get isShuffleOn => _shuffle;
   AudioServiceRepeatMode get repeatMode => _repeatMode;
 
-  // ─── BaseAudioHandler overrides ─────────────────────────────────
+  // ── BaseAudioHandler overrides ──────────────────────────────────────────
 
   @override
   Future<void> play() => _player.play();
@@ -104,11 +90,7 @@ class AudioPlayerService extends BaseAudioHandler with QueueHandler, SeekHandler
   @override
   Future<void> skipToNext() async {
     if (_queue.isEmpty) return;
-    if (_shuffle) {
-      _currentIndex = (_currentIndex + 1 + _queue.length) % _queue.length;
-    } else {
-      _currentIndex = (_currentIndex + 1) % _queue.length;
-    }
+    _currentIndex = (_currentIndex + 1) % _queue.length;
     await _loadCurrent();
     await play();
     final song = currentSong;
@@ -118,7 +100,6 @@ class AudioPlayerService extends BaseAudioHandler with QueueHandler, SeekHandler
   @override
   Future<void> skipToPrevious() async {
     if (_queue.isEmpty) return;
-    // If played > 3 seconds, restart current track; otherwise go previous
     if (_player.position.inSeconds > 3) {
       await seek(Duration.zero);
       return;
@@ -143,18 +124,11 @@ class AudioPlayerService extends BaseAudioHandler with QueueHandler, SeekHandler
   @override
   Future<void> setRepeatMode(AudioServiceRepeatMode repeatMode) async {
     _repeatMode = repeatMode;
-    switch (repeatMode) {
-      case AudioServiceRepeatMode.none:
-        await _player.setLoopMode(LoopMode.off);
-        break;
-      case AudioServiceRepeatMode.one:
-        await _player.setLoopMode(LoopMode.one);
-        break;
-      case AudioServiceRepeatMode.all:
-      case AudioServiceRepeatMode.group:
-        await _player.setLoopMode(LoopMode.all);
-        break;
-    }
+    await _player.setLoopMode(switch (repeatMode) {
+      AudioServiceRepeatMode.one => LoopMode.one,
+      AudioServiceRepeatMode.all || AudioServiceRepeatMode.group => LoopMode.all,
+      _ => LoopMode.off,
+    });
     playbackState.add(playbackState.value.copyWith(repeatMode: repeatMode));
   }
 
@@ -164,7 +138,7 @@ class AudioPlayerService extends BaseAudioHandler with QueueHandler, SeekHandler
     playbackState.add(playbackState.value.copyWith(shuffleMode: shuffleMode));
   }
 
-  // ─── Convenience toggles (called from UI) ───────────────────────
+  // ── Convenience toggles ─────────────────────────────────────────────────
 
   Future<void> toggleShuffle() async {
     await setShuffleMode(
@@ -173,15 +147,22 @@ class AudioPlayerService extends BaseAudioHandler with QueueHandler, SeekHandler
   }
 
   Future<void> cycleRepeatMode() async {
-    final next = switch (_repeatMode) {
+    await setRepeatMode(switch (_repeatMode) {
       AudioServiceRepeatMode.none => AudioServiceRepeatMode.all,
       AudioServiceRepeatMode.all => AudioServiceRepeatMode.one,
       _ => AudioServiceRepeatMode.none,
-    };
-    await setRepeatMode(next);
+    });
   }
 
-  // ─── Internal helpers ───────────────────────────────────────────
+  // ── Streams ─────────────────────────────────────────────────────────────
+
+  Stream<Duration> get positionStream => _player.positionStream;
+  Stream<Duration?> get durationStream => _player.durationStream;
+  bool get isPlaying => _player.playing;
+  Duration get position => _player.position;
+  Duration? get duration => _player.duration;
+
+  // ── Internal ────────────────────────────────────────────────────────────
 
   Future<void> _loadCurrent() async {
     if (_queue.isEmpty) return;
@@ -191,17 +172,13 @@ class AudioPlayerService extends BaseAudioHandler with QueueHandler, SeekHandler
   }
 
   void _onTrackComplete() {
-    if (_repeatMode == AudioServiceRepeatMode.one) {
-      // Loop handled by just_audio LoopMode.one
-      return;
-    }
+    if (_repeatMode == AudioServiceRepeatMode.one) return;
     if (_currentIndex < _queue.length - 1) {
       skipToNext();
-    } else if (_repeatMode == AudioServiceRepeatMode.all) {
+    } else if (_repeatMode == AudioServiceRepeatMode.all && _queue.isNotEmpty) {
       _currentIndex = 0;
       _loadCurrent().then((_) => play());
     }
-    // else: end of queue, do nothing
   }
 
   void _broadcastState(PlaybackEvent event) {
@@ -237,38 +214,17 @@ class AudioPlayerService extends BaseAudioHandler with QueueHandler, SeekHandler
     ));
   }
 
-  MediaItem _songToMediaItem(Song song) {
-    return MediaItem(
-      id: song.filePath,
-      title: song.title,
-      artist: song.artist,
-      album: song.album,
-      duration: song.duration,
-      artUri: null, // Art is loaded directly from bytes in the UI
-      extras: {'songId': song.id},
-    );
-  }
-
-  /// Stream of the current position
-  Stream<Duration> get positionStream => _player.positionStream;
-
-  /// Stream of the duration (may be null before loaded)
-  Stream<Duration?> get durationStream => _player.durationStream;
-
-  /// Is the player currently playing?
-  bool get isPlaying => _player.playing;
-
-  /// Current position
-  Duration get position => _player.position;
-
-  /// Current duration
-  Duration? get duration => _player.duration;
+  MediaItem _songToMediaItem(Song song) => MediaItem(
+        id: song.filePath,
+        title: song.title,
+        artist: song.artist,
+        album: song.album,
+        duration: song.duration,
+        extras: {'songId': song.id},
+      );
 
   @override
   Future<void> customAction(String name, [Map<String, dynamic>? extras]) async {
-    if (name == 'dispose') {
-      await _player.dispose();
-      super.customAction(name, extras);
-    }
+    if (name == 'dispose') await _player.dispose();
   }
 }

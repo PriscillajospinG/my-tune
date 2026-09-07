@@ -1,14 +1,16 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../models/song.dart';
 import '../models/album.dart';
 import '../models/artist.dart';
+import '../models/song.dart';
 import '../services/database_service.dart';
 import '../services/media_library_service.dart';
-// favoriteSongsProvider lives in playlist_provider to avoid circular deps
-export 'playlist_provider.dart' show favoriteSongsProvider, favoriteNotifierProvider, FavoriteNotifier;
+import 'playlist_provider.dart' show favoriteSongsProvider;
 
-// ─── Songs ────────────────────────────────────────────────────────────────
+export 'playlist_provider.dart'
+    show favoriteSongsProvider, favoriteNotifierProvider, FavoriteNotifier;
+
+// ─── Song / Album / Artist streams ───────────────────────────────────────────
 
 final songsStreamProvider = StreamProvider<List<Song>>((ref) {
   final db = ref.watch(databaseServiceProvider);
@@ -25,7 +27,7 @@ final artistsStreamProvider = StreamProvider<List<Artist>>((ref) {
   return db.watchAllArtists();
 });
 
-// ─── Library Notifier ─────────────────────────────────────────────────────
+// ─── LibraryNotifier ─────────────────────────────────────────────────────────
 
 class LibraryNotifier extends AsyncNotifier<List<Song>> {
   @override
@@ -34,15 +36,14 @@ class LibraryNotifier extends AsyncNotifier<List<Song>> {
     return db.getAllSongs();
   }
 
-  /// Import songs — tries device media query first (Android), then file picker (iOS fallback)
+  /// Import songs — tries device media query first, then file picker fallback
   Future<List<Song>> importSongs() async {
     final mediaService = ref.read(mediaLibraryServiceProvider);
     state = const AsyncValue.loading();
     try {
-      List<Song> imported = [];
-      // Try device media store first (works best on Android)
-      imported = await mediaService.queryDeviceSongs();
-      // If nothing found (e.g. iOS sandbox), fall back to file picker
+      // Try device MediaStore (best on Android)
+      List<Song> imported = await mediaService.queryDeviceSongs();
+      // Fall back to file picker (iOS / manual import)
       if (imported.isEmpty) {
         imported = await mediaService.importSongsFromPicker();
       }
@@ -59,14 +60,12 @@ class LibraryNotifier extends AsyncNotifier<List<Song>> {
   Future<void> deleteSong(int id) async {
     final db = ref.read(databaseServiceProvider);
     await db.deleteSong(id);
-    final all = await db.getAllSongs();
-    state = AsyncValue.data(all);
+    await _refresh();
   }
 
-  Future<void> refresh() async {
+  Future<void> _refresh() async {
     final db = ref.read(databaseServiceProvider);
-    final all = await db.getAllSongs();
-    state = AsyncValue.data(all);
+    state = AsyncValue.data(await db.getAllSongs());
   }
 }
 
@@ -74,16 +73,14 @@ final libraryProvider = AsyncNotifierProvider<LibraryNotifier, List<Song>>(
   LibraryNotifier.new,
 );
 
-// ─── Home data ────────────────────────────────────────────────────────────
+// ─── Home data ────────────────────────────────────────────────────────────────
 
 final recentlyPlayedProvider = FutureProvider<List<Song>>((ref) {
   final db = ref.watch(databaseServiceProvider);
   return db.getRecentlyPlayed(limit: 10);
 });
 
-// favoriteSongsProvider is re-exported from playlist_provider above
-
-// ─── Search ───────────────────────────────────────────────────────────────
+// ─── Search ───────────────────────────────────────────────────────────────────
 
 final searchQueryProvider = StateProvider<String>((ref) => '');
 

@@ -4,7 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/song.dart';
 import '../services/audio_player_service.dart';
 
-// ─── Player state model ────────────────────────────────────────────────────
+// ─── Player state model ───────────────────────────────────────────────────────
 
 class PlayerState {
   final Song? currentSong;
@@ -33,9 +33,10 @@ class PlayerState {
     bool? isShuffle,
     AudioServiceRepeatMode? repeatMode,
     List<Song>? queue,
+    bool clearCurrentSong = false,
   }) {
     return PlayerState(
-      currentSong: currentSong ?? this.currentSong,
+      currentSong: clearCurrentSong ? null : (currentSong ?? this.currentSong),
       isPlaying: isPlaying ?? this.isPlaying,
       position: position ?? this.position,
       duration: duration ?? this.duration,
@@ -46,7 +47,7 @@ class PlayerState {
   }
 }
 
-// ─── Provider ─────────────────────────────────────────────────────────────
+// ─── PlayerNotifier ───────────────────────────────────────────────────────────
 
 class PlayerNotifier extends Notifier<PlayerState> {
   late AudioPlayerService _service;
@@ -55,8 +56,8 @@ class PlayerNotifier extends Notifier<PlayerState> {
   PlayerState build() {
     _service = ref.watch(audioPlayerServiceProvider);
 
-    // Listen to playback state changes
-    _service.playbackState.listen((ps) {
+    // Subscribe to audio_service playback state
+    final sub1 = _service.playbackState.listen((ps) {
       state = state.copyWith(
         isPlaying: ps.playing,
         position: ps.updatePosition,
@@ -65,18 +66,18 @@ class PlayerNotifier extends Notifier<PlayerState> {
       );
     });
 
-    // Listen to position stream
-    _service.positionStream.listen((pos) {
+    // Subscribe to position
+    final sub2 = _service.positionStream.listen((pos) {
       state = state.copyWith(position: pos);
     });
 
-    // Listen to duration changes
-    _service.durationStream.listen((dur) {
+    // Subscribe to duration
+    final sub3 = _service.durationStream.listen((dur) {
       if (dur != null) state = state.copyWith(duration: dur);
     });
 
-    // Listen to mediaItem changes (track changes)
-    _service.mediaItem.listen((item) {
+    // Subscribe to media item (track changes)
+    final sub4 = _service.mediaItem.listen((item) {
       if (item != null) {
         state = state.copyWith(
           currentSong: _service.currentSong,
@@ -84,6 +85,13 @@ class PlayerNotifier extends Notifier<PlayerState> {
           queue: _service.currentQueue,
         );
       }
+    });
+
+    ref.onDispose(() {
+      sub1.cancel();
+      sub2.cancel();
+      sub3.cancel();
+      sub4.cancel();
     });
 
     return const PlayerState();
@@ -106,15 +114,10 @@ class PlayerNotifier extends Notifier<PlayerState> {
   }
 
   Future<void> seekTo(Duration position) => _service.seek(position);
-
   Future<void> skipToNext() => _service.skipToNext();
-
   Future<void> skipToPrevious() => _service.skipToPrevious();
-
   Future<void> toggleShuffle() => _service.toggleShuffle();
-
   Future<void> cycleRepeat() => _service.cycleRepeatMode();
-
   Future<void> skipToIndex(int index) => _service.skipToQueueItem(index);
 }
 
