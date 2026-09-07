@@ -37,7 +37,7 @@ class AppTheme {
         onSecondary: Colors.black,
         onSurface: textPrimary,
       ),
-      fontFamily: 'Outfit',
+      // fontFamily: 'Outfit', // Re-enable after adding real TTF files to assets/fonts/
       textTheme: const TextTheme(
         displayLarge: TextStyle(fontSize: 32, fontWeight: FontWeight.w700, color: textPrimary, letterSpacing: -0.5),
         displayMedium: TextStyle(fontSize: 28, fontWeight: FontWeight.w700, color: textPrimary, letterSpacing: -0.5),

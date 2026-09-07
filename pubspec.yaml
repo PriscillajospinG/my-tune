@@ -29,22 +29,17 @@ dependencies:
   # Navigation
   go_router: ^14.8.1
 
-  # File picking & metadata
+  # File picking (for iOS and as fallback on Android)
   file_picker: ^8.1.7
-  metadata_god: ^0.6.0+1
+
+  # Device audio querying (Android MediaStore + iOS MPMediaQuery) — no Rust required
+  on_audio_query: ^2.9.0
 
   # Permissions
   permission_handler: ^11.4.0
 
-  # Image
-  cached_network_image: ^3.4.1
-
-  # Palette from album art
-  palette_generator: ^0.3.3+4
-
   # Utilities
   uuid: ^4.5.1
-  intl: ^0.20.2
   rxdart: ^0.28.0
 
 dev_dependencies:
@@ -60,16 +55,3 @@ flutter:
   assets:
     - assets/audio/
     - assets/images/
-    - assets/fonts/
-
-  fonts:
-    - family: Outfit
-      fonts:
-        - asset: assets/fonts/Outfit-Regular.ttf
-          weight: 400
-        - asset: assets/fonts/Outfit-Medium.ttf
-          weight: 500
-        - asset: assets/fonts/Outfit-SemiBold.ttf
-          weight: 600
-        - asset: assets/fonts/Outfit-Bold.ttf
-          weight: 700

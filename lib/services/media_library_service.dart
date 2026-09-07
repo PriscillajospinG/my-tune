@@ -3,7 +3,8 @@ import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:metadata_god/metadata_god.dart';
+import 'package:on_audio_query/on_audio_query.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../models/song.dart';
 import '../models/album.dart';
@@ -15,22 +16,27 @@ final mediaLibraryServiceProvider = Provider<MediaLibraryService>((ref) {
   return MediaLibraryService(db);
 });
 
-/// MusicSource abstraction — designed to allow future cloud/online sources
+// ─── MusicSource abstraction ────────────────────────────────────────────────
+// Designed to allow LocalMusicSource, CloudMusicSource, OnlineMusicSource etc.
+
 abstract class MusicSource {
   Future<List<Song>> fetchSongs();
 }
 
-/// Local file system music source
+/// Queries the device's native media library (Android MediaStore / iOS MPMediaQuery)
 class LocalMusicSource implements MusicSource {
   final MediaLibraryService _service;
   LocalMusicSource(this._service);
 
   @override
-  Future<List<Song>> fetchSongs() => _service._importViaPicker();
+  Future<List<Song>> fetchSongs() => _service.queryDeviceSongs();
 }
+
+// ─── MediaLibraryService ────────────────────────────────────────────────────
 
 class MediaLibraryService {
   final DatabaseService _db;
+  final OnAudioQuery _audioQuery = OnAudioQuery();
 
   MediaLibraryService(this._db);
 
@@ -38,18 +44,58 @@ class MediaLibraryService {
     'mp3', 'm4a', 'wav', 'aac', 'flac', 'ogg',
   ];
 
-  /// Opens the file picker and imports selected audio files into the database.
-  /// Returns the newly imported songs.
-  Future<List<Song>> importSongsFromPicker() {
-    return _importViaPicker();
+  // ── Public API ─────────────────────────────────────────────────────────────
+
+  /// Query all songs from device media store (Android/iOS).
+  /// Requests permissions if needed. Returns newly imported songs.
+  Future<List<Song>> queryDeviceSongs() async {
+    final hasPermission = await _requestPermissions();
+    if (!hasPermission) return [];
+
+    final deviceSongs = await _audioQuery.querySongs(
+      sortType: SongSortType.TITLE,
+      orderType: OrderType.ASC_OR_SMALLER,
+      uriType: UriType.EXTERNAL,
+      ignoreCase: true,
+    );
+
+    final imported = <Song>[];
+    for (final ds in deviceSongs) {
+      if (ds.data == null || ds.data!.isEmpty) continue;
+
+      final ext = ds.fileExtension?.toLowerCase() ?? '';
+      if (!_supportedExtensions.contains(ext)) continue;
+
+      // Skip already imported paths
+      final existing = await _db.getAllSongs();
+      if (existing.any((s) => s.filePath == ds.data)) continue;
+
+      final song = Song()
+        ..title = ds.title.isNotEmpty ? ds.title : _fileNameWithoutExt(ds.data!)
+        ..artist = ds.artist ?? 'Unknown Artist'
+        ..album = ds.album ?? 'Unknown Album'
+        ..filePath = ds.data!
+        ..durationMs = ds.duration ?? 0
+        ..albumArtBytes = null // fetched on-demand via on_audio_query
+        ..dateAdded = DateTime.now();
+
+      final id = await _db.saveSong(song);
+      song.id = id;
+
+      await _upsertAlbum(song, ds.albumId);
+      await _upsertArtist(song);
+
+      imported.add(song);
+    }
+    return imported;
   }
 
-  Future<List<Song>> _importViaPicker() async {
+  /// Import songs via file picker (iOS fallback or cross-platform manual import)
+  Future<List<Song>> importSongsFromPicker() async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.audio,
       allowMultiple: true,
       withData: false,
-      withReadStream: false,
     );
 
     if (result == null || result.files.isEmpty) return [];
@@ -62,72 +108,61 @@ class MediaLibraryService {
       final ext = path.split('.').last.toLowerCase();
       if (!_supportedExtensions.contains(ext)) continue;
 
-      // Skip if already imported
       final existing = await _db.getAllSongs();
       if (existing.any((s) => s.filePath == path)) continue;
 
-      final song = await _extractMetadata(path);
+      final song = Song()
+        ..title = _fileNameWithoutExt(path)
+        ..artist = 'Unknown Artist'
+        ..album = 'Unknown Album'
+        ..filePath = path
+        ..durationMs = 0
+        ..albumArtBytes = null
+        ..dateAdded = DateTime.now();
+
       final id = await _db.saveSong(song);
       song.id = id;
-
-      // Update album and artist indexes
-      await _upsertAlbum(song);
+      await _upsertAlbum(song, null);
       await _upsertArtist(song);
-
       imported.add(song);
     }
     return imported;
   }
 
-  /// Extracts ID3/FLAC metadata from an audio file.
-  Future<Song> _extractMetadata(String filePath) async {
-    String title = _fileNameWithoutExt(filePath);
-    String artist = 'Unknown Artist';
-    String album = 'Unknown Album';
-    int durationMs = 0;
-    Uint8List? artBytes;
-
+  /// Fetches album artwork bytes for a song using on_audio_query.
+  /// Returns null if not available.
+  Future<Uint8List?> fetchArtworkForSong(int songId, int? albumId) async {
     try {
-      final metadata = await MetadataGod.readMetadata(file: filePath);
-      if (metadata.title != null && metadata.title!.isNotEmpty) {
-        title = metadata.title!;
-      }
-      if (metadata.artist != null && metadata.artist!.isNotEmpty) {
-        artist = metadata.artist!;
-      }
-      if (metadata.album != null && metadata.album!.isNotEmpty) {
-        album = metadata.album!;
-      }
-      if (metadata.durationMs != null) {
-        durationMs = metadata.durationMs!.toInt();
-      }
-      if (metadata.picture != null) {
-        artBytes = metadata.picture!.data;
-      }
+      final artwork = await _audioQuery.queryArtwork(
+        albumId ?? songId,
+        ArtworkType.ALBUM,
+        quality: 80,
+        size: 400,
+      );
+      return artwork;
     } catch (_) {
-      // Fallback to filename if metadata read fails
+      return null;
     }
-
-    // Estimate duration from file size if not available
-    if (durationMs == 0) {
-      try {
-        final fileSize = await File(filePath).length();
-        // Rough estimate: 128kbps MP3 ≈ 16 bytes/ms
-        durationMs = (fileSize / 16).round().clamp(0, 3600000);
-      } catch (_) {}
-    }
-
-    return Song()
-      ..title = title
-      ..artist = artist
-      ..album = album
-      ..filePath = filePath
-      ..albumArtBytes = artBytes
-      ..durationMs = durationMs
-      ..dateAdded = DateTime.now();
   }
 
-  Future<void> _upsertAlbum(Song song) async {
+  // ── Helpers ────────────────────────────────────────────────────────────────
+
+  Future<bool> _requestPermissions() async {
+    if (Platform.isAndroid) {
+      // Android 13+ uses READ_MEDIA_AUDIO; older uses READ_EXTERNAL_STORAGE
+      final status = await Permission.audio.request();
+      if (status.isGranted) return true;
+      // Fallback for older Android
+      final storage = await Permission.storage.request();
+      return storage.isGranted;
+    } else if (Platform.isIOS) {
+      // on_audio_query handles iOS MPMediaLibrary permission internally
+      return true;
+    }
+    return true;
+  }
+
+  Future<void> _upsertAlbum(Song song, int? deviceAlbumId) async {
     final albums = await _db.getAllAlbums();
     Album? album = albums
         .where((a) => a.name == song.album && a.artist == song.artist)
@@ -137,30 +172,24 @@ class MediaLibraryService {
       album = Album()
         ..name = song.album
         ..artist = song.artist
-        ..artBytes = song.albumArtBytes
+        ..artBytes = null
         ..songIds = [song.id];
     } else {
-      if (!album.songIds.contains(song.id)) {
-        album.songIds.add(song.id);
-      }
-      album.artBytes ??= song.albumArtBytes;
+      if (!album.songIds.contains(song.id)) album.songIds.add(song.id);
     }
     await _db.saveAlbum(album);
   }
 
   Future<void> _upsertArtist(Song song) async {
     final artists = await _db.getAllArtists();
-    Artist? artist =
-        artists.where((a) => a.name == song.artist).firstOrNull;
+    Artist? artist = artists.where((a) => a.name == song.artist).firstOrNull;
 
     if (artist == null) {
       artist = Artist()
         ..name = song.artist
         ..songIds = [song.id];
     } else {
-      if (!artist.songIds.contains(song.id)) {
-        artist.songIds.add(song.id);
-      }
+      if (!artist.songIds.contains(song.id)) artist.songIds.add(song.id);
     }
     await _db.saveArtist(artist);
   }
