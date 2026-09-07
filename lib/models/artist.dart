@@ -1,13 +1,13 @@
-import 'package:isar/isar.dart';
-
-part 'artist.g.dart';
-
-@collection
 class Artist {
-  Id id = Isar.autoIncrement;
+  final int id;
+  final String name;
 
-  @Index(unique: true, replace: true)
-  late String name;
+  const Artist({this.id = 0, required this.name});
 
-  List<int> songIds = [];
+  Map<String, dynamic> toMap() => {'name': name};
+
+  factory Artist.fromMap(Map<String, dynamic> map) => Artist(
+        id: map['id'] as int? ?? 0,
+        name: map['name'] as String? ?? 'Unknown Artist',
+      );
 }

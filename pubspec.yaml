@@ -13,14 +13,13 @@ dependencies:
 
   cupertino_icons: ^1.0.8
 
-  # Audio playback + background service
+  # Audio playback + background service (industry-standard Flutter combo)
   just_audio: ^0.9.44
   audio_service: ^0.18.15
   just_audio_background: ^0.0.1-beta.14
 
-  # Database
-  isar: ^3.1.0+1
-  isar_flutter_libs: ^3.1.0+1
+  # Database — sqflite requires NO code generation
+  sqflite: ^2.4.1
   path_provider: ^2.1.5
 
   # State management
@@ -29,10 +28,10 @@ dependencies:
   # Navigation
   go_router: ^14.8.1
 
-  # File picking (for iOS and as fallback on Android)
+  # File picking (iOS + Android fallback)
   file_picker: ^8.1.7
 
-  # Device audio querying (Android MediaStore + iOS MPMediaQuery) — no Rust required
+  # Device audio querying (Android MediaStore + iOS MPMediaQuery)
   on_audio_query: ^2.9.0
 
   # Permissions
@@ -46,8 +45,6 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
-  isar_generator: ^3.1.0+1
-  build_runner: ^2.4.15
 
 flutter:
   uses-material-design: true
