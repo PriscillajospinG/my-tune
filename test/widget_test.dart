@@ -18,7 +18,7 @@ void main() {
         album: 'Test Album',
         filePath: '/music/test.mp3',
         durationMs: 180000,
-        addedAt: DateTime(2025, 1, 1),
+        dateAdded: DateTime(2025, 1, 1),
       );
 
       final map = song.toMap();
@@ -61,6 +61,7 @@ void main() {
         album: 'Nightfall',
         filePath: '/path/song.mp3',
         durationMs: 215000,
+        dateAdded: DateTime(2025, 1, 1),
       );
 
       await tester.pumpWidget(
