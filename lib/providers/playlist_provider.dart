@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/playlist.dart';
 import '../models/song.dart';
+import '../models/youtube_video.dart';
 import '../services/database_service.dart';
 
 // ─── Playlists ────────────────────────────────────────────────────────────────
@@ -49,6 +50,21 @@ class PlaylistNotifier extends AsyncNotifier<List<Playlist>> {
   Future<List<Song>> getSongsInPlaylist(int playlistId) async {
     final db = ref.read(databaseServiceProvider);
     return db.getSongsInPlaylist(playlistId);
+  }
+
+  Future<void> addYouTubeVideo(int playlistId, String ytVideoId) async {
+    final db = ref.read(databaseServiceProvider);
+    await db.addYouTubeVideoToPlaylist(playlistId, ytVideoId);
+  }
+
+  Future<void> removeYouTubeVideo(int playlistId, String ytVideoId) async {
+    final db = ref.read(databaseServiceProvider);
+    await db.removeYouTubeVideoFromPlaylist(playlistId, ytVideoId);
+  }
+
+  Future<List<YouTubeVideo>> getYouTubeVideosInPlaylist(int playlistId) async {
+    final db = ref.read(databaseServiceProvider);
+    return db.getYouTubeVideosInPlaylist(playlistId);
   }
 
   Future<void> _refresh() async {

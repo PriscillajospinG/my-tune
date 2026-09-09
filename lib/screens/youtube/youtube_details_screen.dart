@@ -7,7 +7,6 @@ import '../../app/theme.dart';
 import '../../models/youtube_video.dart';
 import '../../providers/youtube_provider.dart';
 import '../../services/database_service.dart';
-import '../../services/youtube_service.dart';
 import '../../utils/duration_formatter.dart';
 
 class YouTubeDetailsScreen extends ConsumerStatefulWidget {
@@ -127,9 +126,9 @@ class _YouTubeDetailsScreenState
                       ? CachedNetworkImage(
                           imageUrl: video.thumbnailUrl,
                           fit: BoxFit.cover,
-                          placeholder: (_, __) =>
+                          placeholder: (context, url) =>
                               Container(color: AppTheme.bgCard),
-                          errorWidget: (_, __, ___) =>
+                          errorWidget: (context, url, error) =>
                               Container(color: AppTheme.bgCard),
                         )
                       : Container(color: AppTheme.bgCard),

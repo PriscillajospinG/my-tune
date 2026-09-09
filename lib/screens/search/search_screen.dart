@@ -45,7 +45,6 @@ class _SearchScreenState extends ConsumerState<SearchScreen>
     final mode = ref.watch(searchModeProvider);
     final localQuery = ref.watch(searchQueryProvider);
     final ytQuery = ref.watch(youtubeSearchQueryProvider);
-    final activeQuery = mode == SearchMode.library ? localQuery : ytQuery;
 
     return Scaffold(
       backgroundColor: AppTheme.bgDeep,
@@ -241,7 +240,7 @@ class _YouTubeSearchResults extends ConsumerWidget {
           ],
         ),
       ),
-      error: (_, __) => _YouTubeError(message: errorMsg),
+      error: (err, stack) => _YouTubeError(message: errorMsg),
     );
   }
 

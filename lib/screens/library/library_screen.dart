@@ -61,7 +61,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
                 onPressed: () async {
                   final notifier = ref.read(libraryProvider.notifier);
                   final imported = await notifier.importSongs();
-                  if (imported.isNotEmpty && mounted) {
+                  if (imported.isNotEmpty && context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                       content: Text('Imported ${imported.length} song(s)'),
                       backgroundColor: AppTheme.bgCard,

@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/theme.dart';
 import '../../models/youtube_video.dart';
-import '../../providers/youtube_provider.dart';
 import '../../repositories/youtube_repository.dart';
 import '../../services/database_service.dart';
 import '../../utils/youtube_url_parser.dart';
@@ -79,11 +78,6 @@ class _YouTubePlaylistImportScreenState
         setState(() {
           _loading = false;
           _error = message;
-        });
-      default:
-        setState(() {
-          _loading = false;
-          _error = 'Unable to load playlist.';
         });
     }
   }
@@ -306,7 +300,7 @@ class _PlaylistHeader extends StatelessWidget {
                     width: 56,
                     height: 40,
                     fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => Container(
+                    errorBuilder: (context, error, stackTrace) => Container(
                       width: 56,
                       height: 40,
                       color: AppTheme.bgElevated,

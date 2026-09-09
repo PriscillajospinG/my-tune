@@ -13,7 +13,6 @@ import '../../providers/playlist_provider.dart';
 import '../../providers/youtube_provider.dart';
 import '../../utils/constants.dart';
 import '../../widgets/song_tile.dart';
-import '../../widgets/youtube_video_tile.dart';
 import '../youtube/youtube_details_screen.dart';
 
 class HomeScreen extends ConsumerWidget {
@@ -515,7 +514,7 @@ class _YouTubeRecentRow extends StatelessWidget {
                             height: 60,
                             width: 140,
                             fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) => Container(
+                            errorBuilder: (context, error, stackTrace) => Container(
                               height: 60,
                               color: AppTheme.bgElevated,
                               child: const Icon(Icons.smart_display,
@@ -598,7 +597,7 @@ class _YouTubeFavoritesRow extends StatelessWidget {
                                 height: 60,
                                 width: 140,
                                 fit: BoxFit.cover,
-                                errorBuilder: (_, __, ___) => Container(
+                                errorBuilder: (context, error, stackTrace) => Container(
                                   height: 60,
                                   color: AppTheme.bgElevated,
                                   child: const Icon(Icons.smart_display,

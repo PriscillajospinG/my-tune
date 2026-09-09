@@ -5,11 +5,13 @@ import 'package:go_router/go_router.dart';
 import '../../app/theme.dart';
 import '../../models/playlist.dart';
 import '../../models/song.dart';
-import '../../providers/library_provider.dart';
+import '../../models/youtube_video.dart';
 import '../../providers/player_provider.dart';
 import '../../providers/playlist_provider.dart';
 import '../../services/database_service.dart';
 import '../../widgets/song_tile.dart';
+import '../../widgets/youtube_video_tile.dart';
+import '../youtube/youtube_details_screen.dart';
 
 class PlaylistScreen extends ConsumerWidget {
   const PlaylistScreen({super.key});
@@ -134,10 +136,16 @@ class _PlaylistTile extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final db = ref.watch(databaseServiceProvider);
 
-    return FutureBuilder<List<Song>>(
-      future: db.getSongsInPlaylist(playlist.id),
+    return FutureBuilder<List<dynamic>>(
+      future: Future.wait([
+        db.getSongsInPlaylist(playlist.id),
+        db.getYouTubeVideosInPlaylist(playlist.id),
+      ]),
       builder: (_, snap) {
-        final songs = snap.data ?? [];
+        final songs = snap.data?[0] as List<Song>? ?? [];
+        final ytVideos = snap.data?[1] as List<YouTubeVideo>? ?? [];
+        final totalTracks = songs.length + ytVideos.length;
+
         return Card(
           margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
           color: AppTheme.bgCard,
@@ -145,7 +153,8 @@ class _PlaylistTile extends ConsumerWidget {
               borderRadius: BorderRadius.circular(16)),
           child: InkWell(
             borderRadius: BorderRadius.circular(16),
-            onTap: () => _showPlaylistDetail(context, ref, playlist, songs),
+            onTap: () =>
+                _showPlaylistDetail(context, ref, playlist, songs, ytVideos),
             child: Padding(
               padding: const EdgeInsets.all(14),
               child: Row(
@@ -183,7 +192,9 @@ class _PlaylistTile extends ConsumerWidget {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          '${songs.length} songs',
+                          totalTracks == 1
+                              ? '1 track'
+                              : '$totalTracks tracks',
                           style: const TextStyle(
                               color: AppTheme.textSecondary,
                               fontSize: 12),
@@ -303,7 +314,7 @@ class _PlaylistTile extends ConsumerWidget {
   }
 
   void _showPlaylistDetail(BuildContext context, WidgetRef ref,
-      Playlist playlist, List<Song> songs) {
+      Playlist playlist, List<Song> songs, List<YouTubeVideo> ytVideos) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -312,7 +323,10 @@ class _PlaylistTile extends ConsumerWidget {
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (_) => _PlaylistDetailSheet(
-          playlist: playlist, initialSongs: songs),
+        playlist: playlist,
+        initialSongs: songs,
+        initialYouTubeVideos: ytVideos,
+      ),
     );
   }
 }
@@ -322,9 +336,13 @@ class _PlaylistTile extends ConsumerWidget {
 class _PlaylistDetailSheet extends ConsumerStatefulWidget {
   final Playlist playlist;
   final List<Song> initialSongs;
+  final List<YouTubeVideo> initialYouTubeVideos;
 
-  const _PlaylistDetailSheet(
-      {required this.playlist, required this.initialSongs});
+  const _PlaylistDetailSheet({
+    required this.playlist,
+    required this.initialSongs,
+    required this.initialYouTubeVideos,
+  });
 
   @override
   ConsumerState<_PlaylistDetailSheet> createState() =>
@@ -334,17 +352,20 @@ class _PlaylistDetailSheet extends ConsumerStatefulWidget {
 class _PlaylistDetailSheetState
     extends ConsumerState<_PlaylistDetailSheet> {
   late List<Song> _songs;
+  late List<YouTubeVideo> _youtubeVideos;
 
   @override
   void initState() {
     super.initState();
-    _songs = widget.initialSongs;
+    _songs = List.from(widget.initialSongs);
+    _youtubeVideos = List.from(widget.initialYouTubeVideos);
   }
 
   @override
   Widget build(BuildContext context) {
     final currentSong = ref.watch(playerProvider).currentSong;
     final height = MediaQuery.of(context).size.height * 0.85;
+    final totalTracks = _songs.length + _youtubeVideos.length;
 
     return SizedBox(
       height: height,
@@ -403,49 +424,102 @@ class _PlaylistDetailSheetState
           const SizedBox(height: 4),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Text(
-              '${_songs.length} songs',
-              style: const TextStyle(
-                  color: AppTheme.textSecondary, fontSize: 13),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                totalTracks == 0
+                    ? '0 tracks'
+                    : _youtubeVideos.isEmpty
+                        ? '${_songs.length} ${_songs.length == 1 ? "song" : "songs"}'
+                        : _songs.isEmpty
+                            ? '${_youtubeVideos.length} YouTube ${_youtubeVideos.length == 1 ? "video" : "videos"}'
+                            : '$totalTracks tracks (${_songs.length} local, ${_youtubeVideos.length} YouTube)',
+                style: const TextStyle(
+                    color: AppTheme.textSecondary, fontSize: 13),
+              ),
             ),
           ),
           const Divider(color: AppTheme.divider, height: 24),
 
-          // Songs list
+          // Tracks list
           Expanded(
-            child: _songs.isEmpty
+            child: totalTracks == 0
                 ? _emptyPlaylist()
-                : ListView.builder(
+                : ListView(
                     padding: const EdgeInsets.only(bottom: 24),
-                    itemCount: _songs.length,
-                    itemBuilder: (_, i) {
-                      final song = _songs[i];
-                      return SongTile(
-                        song: song,
-                        isPlaying: currentSong?.id == song.id,
-                        onTap: () {
-                          ref
-                              .read(playerProvider.notifier)
-                              .playSong(song, queue: _songs);
-                          Navigator.pop(context);
-                          context.pushNamed('now-playing');
-                        },
-                        onMoreTap: () =>
-                            _showRemoveDialog(context, ref, song),
-                      );
-                    },
+                    children: [
+                      if (_songs.isNotEmpty && _youtubeVideos.isNotEmpty)
+                        const Padding(
+                          padding: EdgeInsets.fromLTRB(20, 8, 20, 4),
+                          child: Text(
+                            'LOCAL SONGS',
+                            style: TextStyle(
+                              color: AppTheme.textMuted,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 1.0,
+                            ),
+                          ),
+                        ),
+                      ..._songs.map((song) {
+                        return SongTile(
+                          song: song,
+                          isPlaying: currentSong?.id == song.id,
+                          onTap: () {
+                            ref
+                                .read(playerProvider.notifier)
+                                .playSong(song, queue: _songs);
+                            Navigator.pop(context);
+                            context.pushNamed('now-playing');
+                          },
+                          onMoreTap: () =>
+                              _showRemoveDialog(context, ref, song),
+                        );
+                      }),
+                      if (_youtubeVideos.isNotEmpty) ...[
+                        if (_songs.isNotEmpty)
+                          const Padding(
+                            padding: EdgeInsets.fromLTRB(20, 16, 20, 4),
+                            child: Text(
+                              'YOUTUBE VIDEOS',
+                              style: TextStyle(
+                                color: AppTheme.textMuted,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 1.0,
+                              ),
+                            ),
+                          ),
+                        ..._youtubeVideos.map((ytVideo) {
+                          return YouTubeVideoTile(
+                            video: ytVideo,
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                      YouTubeDetailsScreen(video: ytVideo),
+                                ),
+                              );
+                            },
+                            onMoreTap: () =>
+                                _showRemoveYouTubeDialog(context, ref, ytVideo),
+                          );
+                        }),
+                      ],
+                    ],
                   ),
           ),
 
-          // Add songs button
+          // Add items button
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
             child: SizedBox(
               width: double.infinity,
               child: OutlinedButton.icon(
-                onPressed: () => _showAddSongsSheet(context, ref),
+                onPressed: () => _showAddItemsSheet(context, ref),
                 icon: const Icon(Icons.add, color: AppTheme.primary),
-                label: const Text('Add Songs',
+                label: const Text('Add Songs or Videos',
                     style: TextStyle(color: AppTheme.primary)),
                 style: OutlinedButton.styleFrom(
                   side: const BorderSide(color: AppTheme.primary),
@@ -509,71 +583,180 @@ class _PlaylistDetailSheetState
     );
   }
 
-  void _showAddSongsSheet(BuildContext context, WidgetRef ref) {
-    final allSongsAsync = ref.read(songsStreamProvider);
-    allSongsAsync.whenData((allSongs) {
-      final notInPlaylist =
-          allSongs.where((s) => !_songs.any((p) => p.id == s.id)).toList();
-      showModalBottomSheet(
-        context: context,
+  void _showRemoveYouTubeDialog(
+      BuildContext context, WidgetRef ref, YouTubeVideo video) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
         backgroundColor: AppTheme.bgModal,
-        isScrollControlled: true,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-        ),
-        builder: (_) => DraggableScrollableSheet(
-          initialChildSize: 0.6,
+        title: const Text('Remove Video',
+            style: TextStyle(color: AppTheme.textPrimary)),
+        content: Text('Remove "${video.title}" from this playlist?',
+            style: const TextStyle(color: AppTheme.textSecondary)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel',
+                style: TextStyle(color: AppTheme.textSecondary)),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              await ref
+                  .read(playlistProvider.notifier)
+                  .removeYouTubeVideo(widget.playlist.id, video.youtubeVideoId);
+              setState(() => _youtubeVideos.removeWhere(
+                  (v) => v.youtubeVideoId == video.youtubeVideoId));
+              if (context.mounted) Navigator.pop(context);
+            },
+            style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.accentWarm),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showAddItemsSheet(BuildContext context, WidgetRef ref) async {
+    final db = ref.read(databaseServiceProvider);
+    final allSongs = await db.getAllSongs();
+    final allYtVideos = await db.getAllYouTubeVideos();
+
+    if (!context.mounted) return;
+
+    final unaddedSongs =
+        allSongs.where((s) => !_songs.any((p) => p.id == s.id)).toList();
+    final unaddedYtVideos = allYtVideos
+        .where((y) => !_youtubeVideos
+            .any((p) => p.youtubeVideoId == y.youtubeVideoId))
+        .toList();
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppTheme.bgModal,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (_) => DefaultTabController(
+        length: 2,
+        child: DraggableScrollableSheet(
+          initialChildSize: 0.65,
           maxChildSize: 0.9,
           minChildSize: 0.4,
           expand: false,
           builder: (_, scrollCtrl) => Column(
             children: [
               const SizedBox(height: 12),
-              const Text('Add Songs',
+              const Text('Add to Playlist',
                   style: TextStyle(
                       color: AppTheme.textPrimary,
                       fontSize: 18,
                       fontWeight: FontWeight.w700)),
               const SizedBox(height: 8),
-              const Divider(color: AppTheme.divider),
+              const TabBar(
+                indicatorColor: AppTheme.primary,
+                labelColor: AppTheme.primary,
+                unselectedLabelColor: AppTheme.textMuted,
+                tabs: [
+                  Tab(text: 'Local Songs'),
+                  Tab(text: 'YouTube Videos'),
+                ],
+              ),
+              const Divider(color: AppTheme.divider, height: 1),
               Expanded(
-                child: notInPlaylist.isEmpty
-                    ? const Center(
-                        child: Text('All songs are already added',
-                            style: TextStyle(
-                                color: AppTheme.textSecondary)))
-                    : ListView.builder(
-                        controller: scrollCtrl,
-                        itemCount: notInPlaylist.length,
-                        itemBuilder: (_, i) {
-                          final song = notInPlaylist[i];
-                          return ListTile(
-                            leading: const Icon(Icons.music_note,
-                                color: AppTheme.textMuted),
-                            title: Text(song.title,
-                                style: const TextStyle(
-                                    color: AppTheme.textPrimary)),
-                            subtitle: Text(song.artist,
-                                style: const TextStyle(
-                                    color: AppTheme.textSecondary)),
-                            trailing: const Icon(Icons.add_circle,
-                                color: AppTheme.primary),
-                            onTap: () async {
-                              await ref
-                                  .read(playlistProvider.notifier)
-                                  .addSong(widget.playlist.id, song.id);
-                              setState(() => _songs.add(song));
-                              if (context.mounted) Navigator.pop(context);
+                child: TabBarView(
+                  children: [
+                    // Local Songs Tab
+                    unaddedSongs.isEmpty
+                        ? const Center(
+                            child: Text('All local songs are already added',
+                                style: TextStyle(
+                                    color: AppTheme.textSecondary)))
+                        : ListView.builder(
+                            controller: scrollCtrl,
+                            itemCount: unaddedSongs.length,
+                            itemBuilder: (ctx, i) {
+                              final song = unaddedSongs[i];
+                              return ListTile(
+                                leading: const Icon(Icons.music_note,
+                                    color: AppTheme.textMuted),
+                                title: Text(song.title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                        color: AppTheme.textPrimary)),
+                                subtitle: Text(song.artist,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                        color: AppTheme.textSecondary)),
+                                trailing: const Icon(Icons.add_circle,
+                                    color: AppTheme.primary),
+                                onTap: () async {
+                                  await ref
+                                      .read(playlistProvider.notifier)
+                                      .addSong(widget.playlist.id, song.id);
+                                  setState(() => _songs.add(song));
+                                  if (ctx.mounted) Navigator.pop(ctx);
+                                },
+                              );
                             },
-                          );
-                        },
-                      ),
+                          ),
+                    // YouTube Tab
+                    unaddedYtVideos.isEmpty
+                        ? const Center(
+                            child: Padding(
+                              padding: EdgeInsets.all(24),
+                              child: Text(
+                                'No saved YouTube videos available.\nSave videos from Search or import a playlist first.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                    color: AppTheme.textSecondary,
+                                    fontSize: 13),
+                              ),
+                            ),
+                          )
+                        : ListView.builder(
+                            controller: scrollCtrl,
+                            itemCount: unaddedYtVideos.length,
+                            itemBuilder: (ctx, i) {
+                              final yv = unaddedYtVideos[i];
+                              return ListTile(
+                                leading: const Icon(Icons.smart_display,
+                                    color: Color(0xFFFF4444)),
+                                title: Text(yv.title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                        color: AppTheme.textPrimary)),
+                                subtitle: Text(yv.channelName,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                        color: AppTheme.textSecondary)),
+                                trailing: const Icon(Icons.add_circle,
+                                    color: AppTheme.primary),
+                                onTap: () async {
+                                  await ref
+                                      .read(playlistProvider.notifier)
+                                      .addYouTubeVideo(
+                                          widget.playlist.id,
+                                          yv.youtubeVideoId);
+                                  setState(() => _youtubeVideos.add(yv));
+                                  if (ctx.mounted) Navigator.pop(ctx);
+                                },
+                              );
+                            },
+                          ),
+                  ],
+                ),
               ),
             ],
           ),
         ),
-      );
-    });
+      ),
+    );
   }
 }
 
