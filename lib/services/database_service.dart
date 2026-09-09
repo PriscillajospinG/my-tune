@@ -9,6 +9,8 @@ import '../models/album.dart';
 import '../models/artist.dart';
 import '../models/playlist.dart';
 import '../models/song.dart';
+import '../models/youtube_video.dart';
+import '../models/media_source_type.dart';
 
 // ─── Provider ────────────────────────────────────────────────────────────────
 
@@ -27,6 +29,7 @@ class DatabaseService {
   final _artistStreamController = StreamController<List<Artist>>.broadcast();
   final _playlistStreamController = StreamController<List<Playlist>>.broadcast();
   final _favStreamController = StreamController<List<Song>>.broadcast();
+  final _ytVideoStreamController = StreamController<List<YouTubeVideo>>.broadcast();
 
   // ── Database init ──────────────────────────────────────────────────────────
 
@@ -41,8 +44,9 @@ class DatabaseService {
 
     return openDatabase(
       dbPath,
-      version: 1,
+      version: 2,
       onCreate: _onCreate,
+      onUpgrade: _onUpgrade,
     );
   }
 
@@ -118,6 +122,53 @@ class DatabaseService {
 
     await db.execute('CREATE INDEX idx_playlist_songs_playlist ON playlist_songs(playlistId)');
     await db.execute('CREATE INDEX idx_recently_played_time ON recently_played(playedAt DESC)');
+
+    // ── YouTube tables (created fresh on v1 installs too) ─────────────────
+    await _createYouTubeTables(db);
+  }
+
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      // Extend existing tables for mixed-source support
+      try {
+        await db.execute(
+            "ALTER TABLE playlist_songs ADD COLUMN sourceType TEXT NOT NULL DEFAULT 'local'");
+        await db.execute(
+            'ALTER TABLE playlist_songs ADD COLUMN youtubeVideoId TEXT');
+        await db.execute(
+            "ALTER TABLE recently_played ADD COLUMN sourceType TEXT NOT NULL DEFAULT 'local'");
+        await db.execute(
+            'ALTER TABLE recently_played ADD COLUMN youtubeVideoId TEXT');
+      } catch (_) {
+        // Columns may already exist on some edge-case upgrade paths — safe to ignore.
+      }
+      await _createYouTubeTables(db);
+    }
+  }
+
+  Future<void> _createYouTubeTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS youtube_videos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        youtubeVideoId TEXT NOT NULL UNIQUE,
+        title TEXT NOT NULL,
+        channelName TEXT NOT NULL,
+        thumbnailUrl TEXT NOT NULL,
+        durationSeconds INTEGER NOT NULL DEFAULT 0,
+        description TEXT DEFAULT '',
+        dateAdded INTEGER NOT NULL
+      )
+    ''');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_youtube_videos_ytid ON youtube_videos(youtubeVideoId)');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS youtube_favorites (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        youtubeVideoId TEXT NOT NULL UNIQUE,
+        addedAt INTEGER NOT NULL
+      )
+    ''');
   }
 
   // ── Songs ─────────────────────────────────────────────────────────────────
@@ -414,5 +465,186 @@ class DatabaseService {
     _artistStreamController.close();
     _playlistStreamController.close();
     _favStreamController.close();
+    _ytVideoStreamController.close();
+  }
+
+  // ── YouTube Videos ────────────────────────────────────────────────────────
+
+  Future<List<YouTubeVideo>> getAllYouTubeVideos() async {
+    final db = await database;
+    final rows = await db.query('youtube_videos', orderBy: 'dateAdded DESC');
+    return rows.map(YouTubeVideo.fromMap).toList();
+  }
+
+  Stream<List<YouTubeVideo>> watchAllYouTubeVideos() =>
+      _ytVideoStreamController.stream;
+
+  Future<YouTubeVideo?> getYouTubeVideoById(String ytId) async {
+    final db = await database;
+    final rows = await db.query('youtube_videos',
+        where: 'youtubeVideoId = ?', whereArgs: [ytId]);
+    if (rows.isEmpty) return null;
+    return YouTubeVideo.fromMap(rows.first);
+  }
+
+  Future<int> saveYouTubeVideo(YouTubeVideo video) async {
+    final db = await database;
+    final id = await db.insert(
+      'youtube_videos',
+      video.toMap(),
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+    await _notifyYtVideos();
+    return id;
+  }
+
+  Future<void> deleteYouTubeVideo(String ytId) async {
+    final db = await database;
+    await db.transaction((txn) async {
+      await txn.delete('youtube_videos',
+          where: 'youtubeVideoId = ?', whereArgs: [ytId]);
+      await txn.delete('youtube_favorites',
+          where: 'youtubeVideoId = ?', whereArgs: [ytId]);
+    });
+    await _notifyYtVideos();
+  }
+
+  Future<bool> isYouTubeVideoSaved(String ytId) async {
+    final db = await database;
+    final rows = await db.query('youtube_videos',
+        columns: ['id'], where: 'youtubeVideoId = ?', whereArgs: [ytId]);
+    return rows.isNotEmpty;
+  }
+
+  // ── YouTube Favorites ─────────────────────────────────────────────────────
+
+  Future<bool> isYouTubeFavorite(String ytId) async {
+    final db = await database;
+    final rows = await db.query('youtube_favorites',
+        where: 'youtubeVideoId = ?', whereArgs: [ytId]);
+    return rows.isNotEmpty;
+  }
+
+  Future<void> toggleYouTubeFavorite(String ytId) async {
+    final db = await database;
+    final existing = await db.query('youtube_favorites',
+        where: 'youtubeVideoId = ?', whereArgs: [ytId]);
+    if (existing.isNotEmpty) {
+      await db.delete('youtube_favorites',
+          where: 'youtubeVideoId = ?', whereArgs: [ytId]);
+    } else {
+      await db.insert('youtube_favorites', {
+        'youtubeVideoId': ytId,
+        'addedAt': DateTime.now().millisecondsSinceEpoch,
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+    }
+  }
+
+  Future<Set<String>> getAllYouTubeFavoriteIds() async {
+    final db = await database;
+    final rows = await db.query('youtube_favorites', columns: ['youtubeVideoId']);
+    return rows.map((r) => r['youtubeVideoId'] as String).toSet();
+  }
+
+  Future<List<YouTubeVideo>> getFavoriteYouTubeVideos() async {
+    final db = await database;
+    final rows = await db.rawQuery('''
+      SELECT yv.* FROM youtube_videos yv
+      INNER JOIN youtube_favorites yf ON yf.youtubeVideoId = yv.youtubeVideoId
+      ORDER BY yf.addedAt DESC
+    ''');
+    return rows.map(YouTubeVideo.fromMap).toList();
+  }
+
+  // ── YouTube in Playlists ──────────────────────────────────────────────────
+
+  Future<void> addYouTubeVideoToPlaylist(
+      int playlistId, String ytVideoId) async {
+    final db = await database;
+    final existing = await db.query('playlist_songs',
+        where: 'playlistId = ? AND youtubeVideoId = ?',
+        whereArgs: [playlistId, ytVideoId]);
+    if (existing.isNotEmpty) return;
+
+    final maxPos = await db.rawQuery(
+        'SELECT MAX(position) as pos FROM playlist_songs WHERE playlistId = ?',
+        [playlistId]);
+    final pos = (maxPos.first['pos'] as int? ?? -1) + 1;
+
+    await db.insert(
+        'playlist_songs',
+        {
+          'playlistId': playlistId,
+          'songId': 0, // unused for youtube items
+          'youtubeVideoId': ytVideoId,
+          'sourceType': MediaSourceType.youtube.value,
+          'position': pos,
+        },
+        conflictAlgorithm: ConflictAlgorithm.ignore);
+    await _notifyPlaylists();
+  }
+
+  Future<List<YouTubeVideo>> getYouTubeVideosInPlaylist(int playlistId) async {
+    final db = await database;
+    final rows = await db.rawQuery('''
+      SELECT yv.* FROM youtube_videos yv
+      INNER JOIN playlist_songs ps
+        ON ps.youtubeVideoId = yv.youtubeVideoId
+      WHERE ps.playlistId = ? AND ps.sourceType = 'youtube'
+      ORDER BY ps.position ASC
+    ''', [playlistId]);
+    return rows.map(YouTubeVideo.fromMap).toList();
+  }
+
+  Future<void> removeYouTubeVideoFromPlaylist(
+      int playlistId, String ytVideoId) async {
+    final db = await database;
+    await db.delete('playlist_songs',
+        where: 'playlistId = ? AND youtubeVideoId = ?',
+        whereArgs: [playlistId, ytVideoId]);
+    await _notifyPlaylists();
+  }
+
+  // ── YouTube in Recently Played ────────────────────────────────────────────
+
+  Future<void> recordYouTubePlay(String ytVideoId) async {
+    final db = await database;
+    await db.insert('recently_played', {
+      'songId': 0, // unused for youtube items
+      'youtubeVideoId': ytVideoId,
+      'sourceType': MediaSourceType.youtube.value,
+      'playedAt': DateTime.now().millisecondsSinceEpoch,
+    });
+    // Prune old records
+    await db.execute('''
+      DELETE FROM recently_played
+      WHERE id NOT IN (
+        SELECT id FROM recently_played ORDER BY playedAt DESC LIMIT 500
+      )
+    ''');
+  }
+
+  Future<List<YouTubeVideo>> getRecentlyPlayedYouTubeVideos(
+      {int limit = 20}) async {
+    final db = await database;
+    final rows = await db.rawQuery('''
+      SELECT yv.*, MAX(rp.playedAt) as lastPlayed
+      FROM youtube_videos yv
+      INNER JOIN recently_played rp ON rp.youtubeVideoId = yv.youtubeVideoId
+      WHERE rp.sourceType = 'youtube'
+      GROUP BY yv.youtubeVideoId
+      ORDER BY lastPlayed DESC
+      LIMIT ?
+    ''', [limit]);
+    return rows.map(YouTubeVideo.fromMap).toList();
+  }
+
+  // ── YouTube stream notification ───────────────────────────────────────────
+
+  Future<void> _notifyYtVideos() async {
+    final videos = await getAllYouTubeVideos();
+    if (!_ytVideoStreamController.isClosed) {
+      _ytVideoStreamController.add(videos);
+    }
   }
 }

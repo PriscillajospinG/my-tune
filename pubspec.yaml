@@ -42,6 +42,12 @@ dependencies:
   uuid: ^4.5.1
   rxdart: ^0.28.0
 
+  # YouTube integration
+  http: ^1.2.2
+  url_launcher: ^6.3.1
+  cached_network_image: ^3.4.1
+  connectivity_plus: ^6.1.2
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
