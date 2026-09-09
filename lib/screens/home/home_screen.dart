@@ -472,3 +472,174 @@ class _EmptyHome extends ConsumerWidget {
     );
   }
 }
+
+// ─── YouTube Recently Played Row ──────────────────────────────────────────────
+
+class _YouTubeRecentRow extends StatelessWidget {
+  final List<YouTubeVideo> videos;
+  const _YouTubeRecentRow({required this.videos});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 100,
+      child: ListView.builder(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        scrollDirection: Axis.horizontal,
+        itemCount: videos.length,
+        itemBuilder: (_, i) {
+          final video = videos[i];
+          return GestureDetector(
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => YouTubeDetailsScreen(video: video),
+              ),
+            ),
+            child: Container(
+              width: 140,
+              margin: const EdgeInsets.only(right: 12),
+              decoration: BoxDecoration(
+                color: AppTheme.bgCard,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ClipRRect(
+                    borderRadius: const BorderRadius.vertical(
+                        top: Radius.circular(10)),
+                    child: video.thumbnailUrl.isNotEmpty
+                        ? Image.network(
+                            video.thumbnailUrl,
+                            height: 60,
+                            width: 140,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => Container(
+                              height: 60,
+                              color: AppTheme.bgElevated,
+                              child: const Icon(Icons.smart_display,
+                                  color: Color(0xFFFF4444)),
+                            ),
+                          )
+                        : Container(
+                            height: 60,
+                            color: AppTheme.bgElevated,
+                            child: const Icon(Icons.smart_display,
+                                color: Color(0xFFFF4444)),
+                          ),
+                  ),
+                  Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                    child: Text(
+                      video.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+// ─── YouTube Favorites Row ────────────────────────────────────────────────────
+
+class _YouTubeFavoritesRow extends StatelessWidget {
+  final List<YouTubeVideo> videos;
+  const _YouTubeFavoritesRow({required this.videos});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 100,
+      child: ListView.builder(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        scrollDirection: Axis.horizontal,
+        itemCount: videos.length,
+        itemBuilder: (_, i) {
+          final video = videos[i];
+          return GestureDetector(
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => YouTubeDetailsScreen(video: video),
+              ),
+            ),
+            child: Container(
+              width: 140,
+              margin: const EdgeInsets.only(right: 12),
+              decoration: BoxDecoration(
+                color: AppTheme.bgCard,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                    color: AppTheme.accentHeart.withValues(alpha: 0.3)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ClipRRect(
+                    borderRadius: const BorderRadius.vertical(
+                        top: Radius.circular(10)),
+                    child: Stack(
+                      children: [
+                        video.thumbnailUrl.isNotEmpty
+                            ? Image.network(
+                                video.thumbnailUrl,
+                                height: 60,
+                                width: 140,
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) => Container(
+                                  height: 60,
+                                  color: AppTheme.bgElevated,
+                                  child: const Icon(Icons.smart_display,
+                                      color: Color(0xFFFF4444)),
+                                ),
+                              )
+                            : Container(
+                                height: 60,
+                                color: AppTheme.bgElevated,
+                                child: const Icon(Icons.smart_display,
+                                    color: Color(0xFFFF4444)),
+                              ),
+                        const Positioned(
+                          top: 4,
+                          right: 4,
+                          child: Icon(Icons.favorite,
+                              size: 12, color: AppTheme.accentHeart),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                    child: Text(
+                      video.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+

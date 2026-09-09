@@ -43,3 +43,10 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# API keys / environment files — NEVER commit these
+*.env
+.env
+.env.*
+env/
+!env/.env.example
