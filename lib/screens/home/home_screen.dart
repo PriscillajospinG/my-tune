@@ -6,11 +6,15 @@ import 'package:go_router/go_router.dart';
 
 import '../../app/theme.dart';
 import '../../models/song.dart';
+import '../../models/youtube_video.dart';
 import '../../providers/library_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../providers/playlist_provider.dart';
+import '../../providers/youtube_provider.dart';
 import '../../utils/constants.dart';
 import '../../widgets/song_tile.dart';
+import '../../widgets/youtube_video_tile.dart';
+import '../youtube/youtube_details_screen.dart';
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
@@ -20,6 +24,8 @@ class HomeScreen extends ConsumerWidget {
     final recentAsync = ref.watch(recentlyPlayedProvider);
     final favsAsync = ref.watch(favoriteSongsProvider);
     final playlistsAsync = ref.watch(playlistsStreamProvider);
+    final ytRecentAsync = ref.watch(recentlyPlayedYouTubeProvider);
+    final ytFavsAsync = ref.watch(youtubeFavoriteSongsProvider);
 
     return Scaffold(
       backgroundColor: AppTheme.bgDeep,
@@ -101,6 +107,30 @@ class HomeScreen extends ConsumerWidget {
                 : _HorizontalSection(
                     title: 'Playlists',
                     child: _PlaylistsRow(playlists: playlists),
+                  ),
+            loading: () => const SliverToBoxAdapter(child: SizedBox.shrink()),
+            error: (_, __) => const SliverToBoxAdapter(child: SizedBox.shrink()),
+          ),
+
+          // ── YouTube Recently Played ──────────────────────────────
+          ytRecentAsync.when(
+            data: (videos) => videos.isEmpty
+                ? const SliverToBoxAdapter(child: SizedBox.shrink())
+                : _HorizontalSection(
+                    title: 'YouTube · Recently Played',
+                    child: _YouTubeRecentRow(videos: videos),
+                  ),
+            loading: () => const SliverToBoxAdapter(child: SizedBox.shrink()),
+            error: (_, __) => const SliverToBoxAdapter(child: SizedBox.shrink()),
+          ),
+
+          // ── YouTube Favorites ────────────────────────────────────
+          ytFavsAsync.when(
+            data: (videos) => videos.isEmpty
+                ? const SliverToBoxAdapter(child: SizedBox.shrink())
+                : _HorizontalSection(
+                    title: 'YouTube Favorites ♥',
+                    child: _YouTubeFavoritesRow(videos: videos),
                   ),
             loading: () => const SliverToBoxAdapter(child: SizedBox.shrink()),
             error: (_, __) => const SliverToBoxAdapter(child: SizedBox.shrink()),

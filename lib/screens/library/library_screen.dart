@@ -3,14 +3,19 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/theme.dart';
+import '../../models/youtube_video.dart';
 import '../../providers/library_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../providers/playlist_provider.dart';
+import '../../providers/youtube_provider.dart';
 import '../../services/database_service.dart';
 import '../../widgets/album_card.dart';
 import '../../widgets/artist_card.dart';
 import '../../widgets/search_bar_widget.dart';
 import '../../widgets/song_tile.dart';
+import '../../widgets/youtube_video_tile.dart';
+import '../youtube/youtube_details_screen.dart';
+import '../youtube/youtube_playlist_import_screen.dart';
 
 class LibraryScreen extends ConsumerStatefulWidget {
   const LibraryScreen({super.key});
@@ -27,7 +32,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
   @override
   void initState() {
     super.initState();
-    _tabCtrl = TabController(length: 4, vsync: this);
+    _tabCtrl = TabController(length: 5, vsync: this);
   }
 
   @override
@@ -72,6 +77,8 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
               unselectedLabelColor: AppTheme.textSecondary,
               indicatorColor: AppTheme.primary,
               indicatorSize: TabBarIndicatorSize.label,
+              isScrollable: true,
+              tabAlignment: TabAlignment.start,
               labelStyle: const TextStyle(
                 fontFamily: 'Outfit',
                 fontWeight: FontWeight.w600,
@@ -82,6 +89,15 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
                 Tab(text: 'Albums'),
                 Tab(text: 'Artists'),
                 Tab(text: 'Playlists'),
+                Tab(
+                  child: Row(
+                    children: [
+                      Icon(Icons.smart_display, size: 14),
+                      SizedBox(width: 4),
+                      Text('YouTube'),
+                    ],
+                  ),
+                ),
               ],
             ),
           ),
@@ -95,6 +111,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
             const _AlbumsTab(),
             const _ArtistsTab(),
             const _PlaylistsTab(),
+            const _YouTubeTab(),
           ],
         ),
       ),
@@ -451,3 +468,126 @@ class _SongOptionsSheet extends ConsumerWidget {
     );
   }
 }
+
+// ─── YouTube Tab ──────────────────────────────────────────────────────────────
+
+class _YouTubeTab extends ConsumerWidget {
+  const _YouTubeTab();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final videosAsync = ref.watch(savedYouTubeVideosProvider);
+
+    return videosAsync.when(
+      data: (videos) {
+        return Column(
+          children: [
+            // ── Import playlist button ────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+              child: OutlinedButton.icon(
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const YouTubePlaylistImportScreen(),
+                  ),
+                ),
+                icon: const Icon(Icons.playlist_add, color: AppTheme.primary),
+                label: const Text('Import YouTube Playlist',
+                    style: TextStyle(color: AppTheme.primary)),
+                style: OutlinedButton.styleFrom(
+                  side: const BorderSide(color: AppTheme.primary),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ),
+
+            if (videos.isEmpty)
+              const Expanded(
+                child: Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(32),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.smart_display_rounded,
+                            size: 64, color: Color(0xFFFF4444)),
+                        SizedBox(height: 16),
+                        Text('No YouTube videos saved',
+                            style: TextStyle(
+                                color: AppTheme.textPrimary,
+                                fontSize: 18,
+                                fontWeight: FontWeight.w600)),
+                        SizedBox(height: 8),
+                        Text(
+                          'Search YouTube or import a playlist to save videos here.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                              color: AppTheme.textSecondary, fontSize: 14),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              )
+            else
+              Expanded(
+                child: ListView.builder(
+                  padding: const EdgeInsets.only(bottom: 100),
+                  itemCount: videos.length,
+                  itemBuilder: (_, i) {
+                    final video = videos[i];
+                    return YouTubeVideoTile(
+                      video: video,
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              YouTubeDetailsScreen(video: video),
+                        ),
+                      ),
+                      onMoreTap: () =>
+                          _showYtOptions(context, ref, video),
+                    );
+                  },
+                ),
+              ),
+          ],
+        );
+      },
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (e, _) => Center(child: Text('Error: $e')),
+    );
+  }
+
+  void _showYtOptions(
+      BuildContext context, WidgetRef ref, YouTubeVideo video) {
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            ListTile(
+              leading: const Icon(Icons.delete_outline,
+                  color: AppTheme.accentWarm),
+              title: const Text('Remove from Library',
+                  style: TextStyle(color: AppTheme.textPrimary)),
+              onTap: () async {
+                Navigator.pop(ctx);
+                await ref
+                    .read(databaseServiceProvider)
+                    .deleteYouTubeVideo(video.youtubeVideoId);
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
