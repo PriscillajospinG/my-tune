@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -151,8 +152,8 @@ class YouTubeService {
         'playlistId': playlistId,
         'maxResults': '50',
         'key': _apiKey,
-        if (pageToken != null) 'pageToken': pageToken,
       };
+      if (pageToken != null) params['pageToken'] = pageToken;
       final uri = Uri.parse('$_base/playlistItems')
           .replace(queryParameters: params);
       final json = await _get(uri);
@@ -187,12 +188,16 @@ class YouTubeService {
     } on TimeoutException {
       throw const YouTubeApiException(
           'Request timed out', YouTubeApiError.timeout);
-    } on SocketException {
-      throw const YouTubeApiException(
-          'No internet connection', YouTubeApiError.networkError);
     } on YouTubeApiException {
       rethrow;
     } catch (e) {
+      // Includes SocketException (no network), http exceptions, etc.
+      if ('$e'.contains('SocketException') ||
+          '$e'.contains('No address associated') ||
+          '$e'.contains('Failed host lookup')) {
+        throw const YouTubeApiException(
+            'No internet connection', YouTubeApiError.networkError);
+      }
       throw YouTubeApiException('$e', YouTubeApiError.unknown);
     }
   }
