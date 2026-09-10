@@ -47,6 +47,9 @@ class DatabaseService {
       version: 2,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
+      onOpen: (db) async {
+        await _createYouTubeTables(db);
+      },
     );
   }
 
@@ -96,6 +99,8 @@ class DatabaseService {
         playlistId INTEGER NOT NULL,
         songId INTEGER NOT NULL,
         position INTEGER NOT NULL DEFAULT 0,
+        sourceType TEXT NOT NULL DEFAULT 'local',
+        youtubeVideoId TEXT,
         UNIQUE(playlistId, songId),
         FOREIGN KEY(playlistId) REFERENCES playlists(id),
         FOREIGN KEY(songId) REFERENCES songs(id)
@@ -116,6 +121,8 @@ class DatabaseService {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         songId INTEGER NOT NULL,
         playedAt INTEGER NOT NULL,
+        sourceType TEXT NOT NULL DEFAULT 'local',
+        youtubeVideoId TEXT,
         FOREIGN KEY(songId) REFERENCES songs(id)
       )
     ''');
@@ -129,24 +136,28 @@ class DatabaseService {
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) {
-      // Extend existing tables for mixed-source support
-      try {
-        await db.execute(
-            "ALTER TABLE playlist_songs ADD COLUMN sourceType TEXT NOT NULL DEFAULT 'local'");
-        await db.execute(
-            'ALTER TABLE playlist_songs ADD COLUMN youtubeVideoId TEXT');
-        await db.execute(
-            "ALTER TABLE recently_played ADD COLUMN sourceType TEXT NOT NULL DEFAULT 'local'");
-        await db.execute(
-            'ALTER TABLE recently_played ADD COLUMN youtubeVideoId TEXT');
-      } catch (_) {
-        // Columns may already exist on some edge-case upgrade paths — safe to ignore.
-      }
       await _createYouTubeTables(db);
     }
   }
 
   Future<void> _createYouTubeTables(Database db) async {
+    try {
+      await db.execute(
+          "ALTER TABLE playlist_songs ADD COLUMN sourceType TEXT NOT NULL DEFAULT 'local'");
+    } catch (_) {}
+    try {
+      await db.execute(
+          'ALTER TABLE playlist_songs ADD COLUMN youtubeVideoId TEXT');
+    } catch (_) {}
+    try {
+      await db.execute(
+          "ALTER TABLE recently_played ADD COLUMN sourceType TEXT NOT NULL DEFAULT 'local'");
+    } catch (_) {}
+    try {
+      await db.execute(
+          'ALTER TABLE recently_played ADD COLUMN youtubeVideoId TEXT');
+    } catch (_) {}
+
     await db.execute('''
       CREATE TABLE IF NOT EXISTS youtube_videos (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
