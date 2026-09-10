@@ -40,6 +40,15 @@
 	<key>NSMicrophoneUsageDescription</key>
 	<string>MyTune does not use the microphone.</string>
 
+	<!-- ── URL Schemes for external application launching ─────────────── -->
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>youtube</string>
+		<string>vnd.youtube</string>
+		<string>https</string>
+		<string>http</string>
+	</array>
+
 	<!-- ── Scene / UI config ──────────────────────────────────────────── -->
 	<key>UIApplicationSceneManifest</key>
 	<dict>

@@ -53,19 +53,37 @@ class _YouTubeDetailsScreenState
   }
 
   Future<void> _openInYouTube() async {
-    final uri = Uri.parse(widget.video.watchUrl);
-    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Could not open YouTube.'),
-          behavior: SnackBarBehavior.floating,
-        ));
+    final videoId = widget.video.youtubeVideoId;
+    final appUri = Uri.parse('youtube://watch?v=$videoId');
+    final webUri = Uri.parse(widget.video.watchUrl);
+
+    bool launched = false;
+    try {
+      if (await canLaunchUrl(appUri)) {
+        launched = await launchUrl(appUri, mode: LaunchMode.externalApplication);
       }
-    } else {
+      if (!launched && await canLaunchUrl(webUri)) {
+        launched = await launchUrl(webUri, mode: LaunchMode.externalApplication);
+      }
+      if (!launched) {
+        launched = await launchUrl(webUri, mode: LaunchMode.platformDefault);
+      }
+    } catch (_) {
+      launched = false;
+    }
+
+    if (launched) {
       // Record the play in recently played
       await ref
           .read(databaseServiceProvider)
           .recordYouTubePlay(widget.video.youtubeVideoId);
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Could not open YouTube link.'),
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
     }
   }
 

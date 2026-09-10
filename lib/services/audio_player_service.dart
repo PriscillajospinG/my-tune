@@ -1,4 +1,5 @@
 import 'package:audio_service/audio_service.dart';
+import 'package:audio_session/audio_session.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart';
 
@@ -27,6 +28,8 @@ class AudioPlayerService extends BaseAudioHandler
   }
 
   void _init() {
+    _initAudioSession();
+
     _player.playbackEventStream.listen(_broadcastState);
 
     _player.playerStateStream.listen((state) {
@@ -41,6 +44,29 @@ class AudioPlayerService extends BaseAudioHandler
         bufferedPosition: _player.bufferedPosition,
       ));
     });
+  }
+
+  Future<void> _initAudioSession() async {
+    try {
+      final session = await AudioSession.instance;
+      await session.configure(const AudioSessionConfiguration.music());
+
+      // Pause playback when headphones or AirPods are unplugged/disconnected
+      session.becomingNoisyEventStream.listen((_) {
+        pause();
+      });
+
+      // Handle system audio interruptions (e.g., phone calls, Siri)
+      session.interruptionEventStream.listen((event) {
+        if (event.begin) {
+          pause();
+        } else if (event.type == AudioInterruptionType.pause) {
+          play();
+        }
+      });
+    } catch (_) {
+      // Audio session setup is best-effort on desktop / edge platforms
+    }
   }
 
   // ── Public API ──────────────────────────────────────────────────────────

@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/album.dart';
@@ -26,7 +28,7 @@ final artistsStreamProvider = StreamProvider<List<Artist>>((ref) {
   return db.watchAllArtists();
 });
 
-// ─── LibraryNotifier ─────────────────────────────────────────────────────────
+// ─── Library Notifier ─────────────────────────────────────────────────────────
 
 class LibraryNotifier extends AsyncNotifier<List<Song>> {
   @override
@@ -35,16 +37,21 @@ class LibraryNotifier extends AsyncNotifier<List<Song>> {
     return db.getAllSongs();
   }
 
-  /// Import songs — tries device media query first, then file picker fallback
+  /// Import songs — uses file picker on iOS, device media store with file picker fallback on Android
   Future<List<Song>> importSongs() async {
     final mediaService = ref.read(mediaLibraryServiceProvider);
     state = const AsyncValue.loading();
     try {
-      // Try device MediaStore (best on Android)
-      List<Song> imported = await mediaService.queryDeviceSongs();
-      // Fall back to file picker (iOS / manual import)
-      if (imported.isEmpty) {
+      List<Song> imported;
+      if (Platform.isIOS) {
         imported = await mediaService.importSongsFromPicker();
+      } else {
+        // Try device MediaStore (best on Android)
+        imported = await mediaService.queryDeviceSongs();
+        // Fall back to file picker (manual import)
+        if (imported.isEmpty) {
+          imported = await mediaService.importSongsFromPicker();
+        }
       }
       final db = ref.read(databaseServiceProvider);
       final all = await db.getAllSongs();
