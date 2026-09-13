@@ -60,7 +60,7 @@ class MainShell extends ConsumerWidget {
             NavigationBar(
               backgroundColor: Colors.transparent,
               elevation: 0,
-              indicatorColor: AppTheme.primary.withOpacity(0.18),
+              indicatorColor: AppTheme.primary.withValues(alpha: 0.18),
               selectedIndex: selectedIndex,
               labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
               height: AppConstants.bottomNavHeight + 10,
